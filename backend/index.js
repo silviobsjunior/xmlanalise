@@ -665,102 +665,121 @@ app.get('/api/filtros-vendedores', async (req, res) => {
 //
 // LGPD: somente CNPJ, nunca CPF
 // =============================================
+// Substituir a rota atual (linhas ~668-768) por esta versão:
+
 app.get('/api/buscar-produtos', async (req, res) => {
-    console.log(`\n${getTimestamp()} 🔍 BUSCA PÚBLICA DE PRODUTOS`);
+    console.log(`\n${getTimestamp()} 🔍 BUSCA PÚBLICA DE PRODUTOS (via Supabase)`);
+
     try {
         const { termo, cidade, bairro } = req.query;
-        if (!termo || termo.length < 3)
-            return res.status(400).json({ sucesso: false, erro: 'Termo deve ter pelo menos 3 caracteres' });
 
-        const params = [`%${termo}%`];
-        let filtroE = '', filtroD = '';
-        if (cidade) {
-            params.push(cidade);
-            filtroE += ` AND e.municipio ILIKE $${params.length}`;
-            filtroD += ` AND d.municipio ILIKE $${params.length}`;
-        }
-        if (bairro) {
-            params.push(bairro);
-            filtroE += ` AND e.bairro ILIKE $${params.length}`;
-            filtroD += ` AND d.bairro ILIKE $${params.length}`;
-        }
-
-        const { rows } = await pool.query(`
-            -- Parte 1: emitentes como vendedores (perspectiva padrão)
-            SELECT
-                p.codigo_barras AS cean, p.descricao AS descricao_produto, p.ncm,
-                e.cnpj AS vendedor_cnpj,
-                e.razao_social AS vendedor_razao_social,
-                e.nome_fantasia AS vendedor_nome_fantasia,
-                e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
-                e.complemento AS vendedor_complemento, e.bairro AS vendedor_bairro,
-                e.municipio AS vendedor_cidade, e.uf AS vendedor_uf,
-                e.cep AS vendedor_cep, e.telefone AS vendedor_telefone,
-                nf.data_emissao
-            FROM produtos_nfe p
-            JOIN nfe_importadas ni ON p.nfe_id = ni.id
-            JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
-            JOIN atores a          ON nf.emitente_id = a.id
-            JOIN emitentes e       ON a.identificador = e.cnpj
-            WHERE e.cnpj IS NOT NULL
-              AND (p.codigo_barras ILIKE $1 OR p.descricao ILIKE $1) ${filtroE}
-
-            UNION ALL
-
-            -- Parte 2: destinatários revendedores como vendedores
-            -- Usa tabela destinatarios (endereço do destinatário = onde ele vende)
-            SELECT
-                p.codigo_barras AS cean, p.descricao AS descricao_produto, p.ncm,
-                d.cnpj AS vendedor_cnpj,
-                d.razao_social AS vendedor_razao_social,
-                NULL AS vendedor_nome_fantasia,
-                d.logradouro AS vendedor_logradouro, d.numero AS vendedor_numero,
-                d.complemento AS vendedor_complemento, d.bairro AS vendedor_bairro,
-                d.municipio AS vendedor_cidade, d.uf AS vendedor_uf,
-                d.cep AS vendedor_cep, d.telefone AS vendedor_telefone,
-                nf.data_emissao
-            FROM produtos_nfe p
-            JOIN nfe_importadas ni ON p.nfe_id = ni.id
-            JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
-            JOIN atores a          ON nf.destinatario_id = a.id
-            JOIN destinatarios d   ON a.identificador = d.cnpj
-            WHERE nf.perspectiva_importador = 'revendedor'
-              AND d.cnpj IS NOT NULL
-              AND (p.codigo_barras ILIKE $1 OR p.descricao ILIKE $1) ${filtroD}
-
-            ORDER BY data_emissao DESC
-            LIMIT 300
-        `, params);
-
-        const map = new Map();
-        rows.forEach(row => {
-            const k = row.vendedor_cnpj; if (!k) return;
-            if (!map.has(k)) map.set(k, {
-                vendedor: {
-                    cnpj: row.vendedor_cnpj,
-                    razao_social: row.vendedor_razao_social,
-                    nome_fantasia: row.vendedor_nome_fantasia,
-                    logradouro: row.vendedor_logradouro, numero: row.vendedor_numero,
-                    complemento: row.vendedor_complemento, bairro: row.vendedor_bairro,
-                    cidade: row.vendedor_cidade, uf: row.vendedor_uf,
-                    cep: row.vendedor_cep, telefone: row.vendedor_telefone,
-                    ultima_venda: row.data_emissao
-                },
-                produtos: []
+        if (!termo || termo.length < 3) {
+            return res.status(400).json({
+                sucesso: false,
+                erro: 'Termo deve ter pelo menos 3 caracteres'
             });
-            const entry = map.get(k);
-            if (row.data_emissao > entry.vendedor.ultima_venda) entry.vendedor.ultima_venda = row.data_emissao;
-            if (!entry.produtos.some(p => p.cean === row.cean && p.descricao === row.descricao_produto))
-                entry.produtos.push({ cean: row.cean, descricao: row.descricao_produto, ncm: row.ncm });
+        }
+
+        // Consulta no Supabase
+        let query = supabase
+            .from('produtos_nfe')
+            .select(`
+                codigo_barras,
+                descricao,
+                ncm,
+                nfe_importadas!inner (
+                    chave_acesso,
+                    notas_fiscais!inner (
+                        emitente:atores!notas_fiscais_emitente_id_fkey (
+                            identificador,
+                            razao_social
+                        ),
+                        destinatario:atores!notas_fiscais_destinatario_id_fkey (
+                            identificador,
+                            razao_social
+                        )
+                    )
+                )
+            `)
+            .or(`descricao.ilike.%${termo}%,codigo_barras.ilike.%${termo}%`)
+            .limit(300);
+
+        const { data, error } = await query;
+
+        if (error) {
+            console.error(`${getTimestamp()} ❌ Erro na consulta Supabase:`, error);
+            throw error;
+        }
+
+        // Processar resultados
+        const vendedores = new Map();
+
+        data?.forEach(item => {
+            const notas = item.nfe_importadas;
+            if (!notas?.notas_fiscais) return;
+
+            const nota = notas.notas_fiscais;
+
+            // Determinar vendedor (emitente ou destinatário baseado na perspectiva)
+            let vendedor = null;
+            let tipo = null;
+
+            // Verificar se é emitente (vendedor original)
+            if (nota.emitente?.identificador) {
+                vendedor = {
+                    cnpj: nota.emitente.identificador,
+                    razao_social: nota.emitente.razao_social,
+                    tipo: 'emitente'
+                };
+                tipo = 'emitente';
+            }
+            // Se não, usar destinatário (revendedor)
+            else if (nota.destinatario?.identificador) {
+                vendedor = {
+                    cnpj: nota.destinatario.identificador,
+                    razao_social: nota.destinatario.razao_social,
+                    tipo: 'destinatario'
+                };
+                tipo = 'destinatario';
+            }
+
+            if (!vendedor) return;
+
+            const key = vendedor.cnpj;
+
+            if (!vendedores.has(key)) {
+                vendedores.set(key, {
+                    vendedor: vendedor,
+                    produtos: []
+                });
+            }
+
+            const entry = vendedores.get(key);
+            if (!entry.produtos.some(p => p.cean === item.codigo_barras)) {
+                entry.produtos.push({
+                    cean: item.codigo_barras,
+                    descricao: item.descricao,
+                    ncm: item.ncm
+                });
+            }
         });
 
-        const resultados = Array.from(map.values());
+        const resultados = Array.from(vendedores.values());
+
         console.log(`${getTimestamp()} ✅ ${resultados.length} vendedor(es) encontrado(s)`);
-        res.json({ sucesso: true, quantidade: resultados.length, resultados });
+        res.json({
+            sucesso: true,
+            quantidade: resultados.length,
+            resultados
+        });
 
     } catch (error) {
         console.error(`${getTimestamp()} ❌ Erro na busca:`, error);
-        res.status(500).json({ sucesso: false, erro: 'Erro ao buscar produtos' });
+        res.status(500).json({
+            sucesso: false,
+            erro: 'Erro ao buscar produtos',
+            detalhes: error.message
+        });
     }
 });
 
