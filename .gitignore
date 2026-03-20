@@ -1,9 +1,11 @@
-
-# Criar .gitignore com tudo que deve ser ignorado
-cat > .gitignore << 'EOF'
 # Secrets and credentials
-*.client_secret_*.json
 *.json
+!.github/
+!.vscode/
+!package.json
+!firebase.json
+!.firebaserc
+!render.yaml
 .env
 *.pem
 *.key
@@ -37,16 +39,11 @@ firebase-debug.log*
 .DS_Store
 Thumbs.db
 
-# Environment
-.env
-.env.local
-.env.production
-
-# dbt / target (não commitar arquivos gerados)
+# dbt / target
 target/
 dbt_packages/
 logs/
 
-# Python
-*.pyc
-__pycache__/
+# Backups
+backups/
+secure-credentials/
