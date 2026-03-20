@@ -213,7 +213,7 @@ pool.connect((err, client, release) => {
 // Configuração do Supabase Client
 const supabase = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
+    process.env.SUPABASE_ANON_KEY
 );
 
 // Configuração do multer para upload de arquivos
