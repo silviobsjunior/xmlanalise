@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="image/favicon.png" type="image/x-icon">
+    <title>AQUI TEM</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            padding: 15px 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo h1 {
+            font-size: 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .user-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px 10px;
+            background: #f5f5f5;
+            border-radius: 20px;
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #fafafa;
+        }
+
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f5f5f5;
+        }
+
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: #e8e8e8;
+        }
+
+        .upload-icon {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .upload-text {
+            font-size: 16px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            font-size: 14px;
+            color: #999;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-outline {
+            background: white;
+            border: 1px solid #ddd;
+            color: #666;
+        }
+
+        .btn-outline:hover {
+            background: #f5f5f5;
+            border-color: #999;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        /* File List */
+        .file-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: all 0.3s ease;
+        }
+
+        .file-item:hover {
+            background: #f5f5f5;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .file-meta {
+            font-size: 12px;
+            color: #999;
+            display: flex;
+            gap: 20px;
+        }
+
+        .file-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            display: inline-block;
+        }
+
+        .badge-user {
+            background: #28a745;
+            color: white;
+        }
+
+        .badge-anon {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        /* Info Grid */
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+
+        .info-item {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            padding: 12px 20px;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            border-left: 4px solid #28a745;
+        }
+
+        .toast.error {
+            border-left: 4px solid #dc3545;
+        }
+
+        .toast.info {
+            border-left: 4px solid #17a2b8;
+        }
+
+        /* Estatísticas */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #f0f0f0;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            color: #666;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            color: #ddd;
+        }
+
+        /* Banner anônimo */
+        .login-banner {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .login-banner p {
+            font-size: 14px;
+            opacity: 0.95;
+        }
+
+        .login-banner button {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            margin-left: 15px;
+        }
+
+        .login-banner button:hover {
+            background: #f0f0f0;
+        }
+
+        /* Upload loading */
+        .upload-area.loading-upload {
+            border-color: #667eea;
+            background: #f0f0ff;
+            cursor: not-allowed;
+            opacity: 0.8;
+        }
+
+        /* Upload Progress */
+        .upload-progress {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #f0f0ff;
+            border-radius: 4px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .info-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            .login-banner {
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+
+            .login-banner button {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">
+                <img src="image/logoicon.png" alt="SANTANA & CIA" width="150" height="auto">
+                <h1>📄 xmlAnalise</h1>
+            </div>
+            <div class="user-section">
+                <div id="anonymousIndicator" style="display: none;" class="user-info">
+                    <div class="user-avatar">👤</div>
+                    <span>Visitante</span>
+                </div>
+                <div id="userInfo" style="display: none;" class="user-info">
+                    <div class="user-avatar" id="userAvatar"></div>
+                    <span id="userName"></span>
+                </div>
+                <button id="loginBtn" class="btn btn-primary">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.748L12.545,10.239z" />
+                    </svg>
+                    Login com Google
+                </button>
+                <button id="logoutBtn" class="btn btn-outline" style="display: none;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M17,7l-1.41,1.41L18.17,11H8v2h10.17l-2.58,2.59L17,17l5-5L17,7z M4,5h8V3H4C2.9,3,2,3.9,2,5v14c0,1.1,0.9,2,2,2h8v-2H4V5z" />
+                    </svg>
+                    Sair
+                </button>
+            </div>
+        </div>
+
+        <!-- Banner discreto para usuários anônimos -->
+        <div id="loginBanner" class="login-banner" style="display:none;">
+            <p>🕶️ Você está navegando como <strong>visitante</strong>. Faça login para salvar seus dados
+                permanentemente.</p>
+            <button id="bannerLoginBtn">Entrar com Google</button>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active" data-tab="busca"         onclick="switchTab('busca')">🔍 Buscar Vendedor</div>
+            <div class="tab"        data-tab="upload"        onclick="switchTab('upload')">📤 Upload</div>
+            <div class="tab"        data-tab="arquivos"      onclick="switchTab('arquivos')">📁 Arquivos</div>
+            <div class="tab"        data-tab="estatisticas"  onclick="switchTab('estatisticas')">📊 Estatísticas</div>
+        </div>
+
+        <!-- Busca Tab -->
+        <div id="buscaTab" class="tab-content">
+            <div class="card">
+                <div class="card-title">🔍 Encontrar Vendedor de um Produto</div>
+                <p style="color:#666; font-size:14px; margin-bottom:20px;">
+                    Digite o código de barras (CEAN) ou parte do nome do produto para encontrar vendedores próximos de
+                    você.
+                </p>
+                <div style="display:flex; gap:10px; margin-bottom:15px;">
+                    <input type="text" id="buscaTermo" placeholder="Ex: 7891000315507 ou Leite Integral..."
+                        style="flex:1; padding:12px 16px; border:2px solid #ddd; border-radius:8px; font-size:15px; outline:none;">
+                    <button id="buscaBtn" class="btn btn-primary"
+                        style="padding:12px 24px; font-size:15px;">Buscar</button>
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px;">
+                    <select id="filtroCidade"
+                        style="padding:9px 12px; border:1px solid #ddd; border-radius:8px; font-size:14px; color:#555; background:white; min-width:180px;">
+                        <option value="">🏙️ Todas as cidades</option>
+                    </select>
+                    <select id="filtroBairro"
+                        style="padding:9px 12px; border:1px solid #ddd; border-radius:8px; font-size:14px; color:#555; background:white; min-width:180px;">
+                        <option value="">📍 Todos os bairros</option>
+                    </select>
+                    <button id="limparFiltrosBtn" class="btn btn-secondary" style="font-size:13px;">Limpar
+                        filtros</button>
+                </div>
+                <div id="buscaLoading" style="display:none; text-align:center; padding:40px; color:#666;">
+                    <p>Buscando vendedores...</p>
+                </div>
+                <div id="buscaVazio" style="display:block; text-align:center; padding:40px; color:#999;">
+                    <p id="buscaVazioMsg">Digite um produto acima para buscar vendedores.</p>
+                </div>
+                <div id="buscaResultados"></div>
+            </div>
+        </div>
+
+        <!-- Upload Tab -->
+        <div id="uploadTab" class="tab-content" style="display:none;">
+            <div class="card">
+                <div class="card-title">Importar XML NF-e</div>
+
+                <!-- Indicador de progresso de upload -->
+                <div id="uploadProgress" class="upload-progress" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                        <span>📤 Processando arquivos...</span>
+                        <span id="uploadCount">0/0</span>
+                    </div>
+                    <div id="uploadDetails" style="font-size: 12px; color: #666;"></div>
+                </div>
+
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="fileInput" accept=".xml" multiple hidden>
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" />
+                    </svg>
+                    <div class="upload-text">Arraste e solte arquivos ou pastas aqui</div>
+                    <div class="upload-hint">ou clique para selecionar</div>
+                </div>
+
+                <!-- Botões auxiliares -->
+                <div style="display: flex; gap: 10px; margin-top: 15px; justify-content: center;">
+                    <button id="selectFilesBtn" class="btn btn-outline">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 5px;">
+                            <path
+                                d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z" />
+                        </svg>
+                        Selecionar Múltiplos Arquivos
+                    </button>
+                    <button id="selectFolderBtn" class="btn btn-outline">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 5px;">
+                            <path
+                                d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10zM8 10v2H6v2h2v2h2v-2h2v-2h-2v-2H8z" />
+                        </svg>
+                        Selecionar Pasta
+                    </button>
+                </div>
+                <!-- Dica: diálogo de confirmação aparecerá ao selecionar arquivos -->
+                <div style="margin-top:14px; padding:10px 14px; background:#f0f2ff; border-radius:8px; border:1px solid #d0d5f5; font-size:12px; color:#555;">
+                    💡 Após selecionar os arquivos, você indicará se é <strong>comprador</strong>, <strong>vendedor</strong> ou <strong>revendedor</strong> antes de importar.
+                </div>
+                <p style="text-align: center; margin-top: 10px; font-size: 12px; color: #999;">
+                    ⚡ Arquivos inválidos serão ignorados automaticamente
+                </p>
+            </div>
+        </div>
+
+        <!-- Arquivos Tab -->
+        <div id="arquivosTab" class="tab-content" style="display: none;">
+            <div class="card">
+                <div class="card-title">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Arquivos Importados</span>
+                        <input type="text" id="searchInput" placeholder="Buscar..."
+                            style="padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; width: 200px;">
+                    </div>
+                </div>
+                <div id="loadingIndicator" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Carregando arquivos...</p>
+                </div>
+                <ul id="fileList" class="file-list"></ul>
+                <div id="emptyState" class="empty-state" style="display: none;">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z" />
+                    </svg>
+                    <p>Nenhum arquivo importado ainda</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estatísticas Tab -->
+        <div id="estatisticasTab" class="tab-content" style="display: none;">
+            <div class="card">
+                <div class="card-title">Estatísticas</div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalXmls">0</div>
+                        <div class="stat-label">Total de XMLs</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalValor">R$ 0,00</div>
+                        <div class="stat-label">Valor Total</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalIcms">R$ 0,00</div>
+                        <div class="stat-label">Total ICMS</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalEmitentes">0</div>
+                        <div class="stat-label">Emitentes</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Detalhes -->
+    <div id="xmlModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Detalhes da NF-e</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+    function switchTab(tabName) {
+        document.querySelectorAll('.tab').forEach(t =>
+            t.classList.toggle('active', t.dataset.tab === tabName));
+        document.querySelectorAll('.tab-content').forEach(c =>
+            c.style.display = 'none');
+        var el = document.getElementById(tabName + 'Tab');
+        if (el) el.style.display = 'block';
+        if (tabName === 'arquivos' && typeof loadNotas === 'function') loadNotas();
+        if (tabName === 'estatisticas' && typeof loadStatistics === 'function') loadStatistics();
+    }
+    </script>
+    <script src="app.js"></script>
+</body>
+
+</html>
