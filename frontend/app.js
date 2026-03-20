@@ -285,7 +285,7 @@ function renderizarResultados(resultados, termo) {
     const nomePrincipal = v.nome_fantasia || v.razao_social || 'Vendedor';
     const nomeSecundario = v.nome_fantasia ? v.razao_social : '';
     const enderecoCompleto = [v.logradouro, v.numero, v.complemento].filter(Boolean).join(', ');
-    const localizacao = [v.bairro, v.cidade, v.uf].filter(Boolean).join(' — ');
+    const localizacao = [v.cidade, v.uf].filter(Boolean).join(' — ');
 
     const produtosHtml = item.produtos.slice(0, 5).map(p => `
       <span style="display:inline-block; background:#e8f0fe; color:#3c5fb5; border-radius:20px;
@@ -306,7 +306,7 @@ function renderizarResultados(resultados, termo) {
     // Maps: abre o endereço no Google Maps (funciona sempre)
     // Street View: usa a URL de embed do Maps com parâmetro cbll que força o modo street
     const enderecoQuery = [v.logradouro, v.numero, v.bairro, v.cidade, v.uf, 'Brasil'].filter(Boolean).join(', ');
-    const mapsUrl       = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoQuery)}`;
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoQuery)}`;
     const streetViewUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(enderecoQuery)}&layer=c`;
     const streetViewHtml = enderecoCompleto
       ? `<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -413,9 +413,9 @@ function mostrarConfirmacaoUpload(files) {
   if (anterior) anterior.remove();
 
   const nomes = {
-    consumidor: { label: '🛒 Sou COMPRADOR',   desc: 'Recebi estes XMLs nas minhas compras. Os vendedores aparecerão nas buscas.' },
-    emitente:   { label: '🏪 Sou VENDEDOR',    desc: 'Estes XMLs são das minhas vendas. Minha empresa aparecerá nas buscas.' },
-    revendedor: { label: '🔄 Sou REVENDEDOR',  desc: 'Comprei estes produtos para revender. Minha empresa aparecerá nas buscas.' }
+    consumidor: { label: '🛒 Sou COMPRADOR', desc: 'Recebi estes XMLs nas minhas compras. Os vendedores aparecerão nas buscas.' },
+    emitente: { label: '🏪 Sou VENDEDOR', desc: 'Estes XMLs são das minhas vendas. Minha empresa aparecerá nas buscas.' },
+    revendedor: { label: '🔄 Sou REVENDEDOR', desc: 'Comprei estes produtos para revender. Minha empresa aparecerá nas buscas.' }
   };
 
   const dialog = document.createElement('div');
@@ -436,7 +436,7 @@ function mostrarConfirmacaoUpload(files) {
       </div>
 
       <div id="opcoesRole" style="display:flex; flex-direction:column; gap:10px; margin-bottom:24px;">
-        ${['consumidor','emitente','revendedor'].map(val => `
+        ${['consumidor', 'emitente', 'revendedor'].map(val => `
           <label id="label_${val}" style="display:flex; align-items:flex-start; gap:12px; padding:14px 16px;
             border:2px solid ${val === 'consumidor' ? '#667eea' : '#e9ecef'};
             border-radius:10px; cursor:pointer;
@@ -469,11 +469,11 @@ function mostrarConfirmacaoUpload(files) {
   // Highlight ao mudar seleção
   dialog.querySelectorAll('input[name="roleUpload"]').forEach(radio => {
     radio.addEventListener('change', () => {
-      ['consumidor','emitente','revendedor'].forEach(v => {
+      ['consumidor', 'emitente', 'revendedor'].forEach(v => {
         const lbl = document.getElementById('label_' + v);
         const sel = v === radio.value;
         lbl.style.borderColor = sel ? '#667eea' : '#e9ecef';
-        lbl.style.background  = sel ? '#f0f2ff' : 'white';
+        lbl.style.background = sel ? '#f0f2ff' : 'white';
       });
     });
   });
@@ -664,7 +664,7 @@ function renderPaginacao(pag) {
     <label style="display:flex;align-items:center;gap:6px;">
       Por página:
       <select id="perPageSelect" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;cursor:pointer;">
-        ${[10,20,50,100].map(n => `<option value="${n}"${n===porPagina?' selected':''}>${n}</option>`).join('')}
+        ${[10, 20, 50, 100].map(n => `<option value="${n}"${n === porPagina ? ' selected' : ''}>${n}</option>`).join('')}
       </select>
     </label>`;
 
@@ -676,23 +676,23 @@ function renderPaginacao(pag) {
     const btn = document.createElement('button');
     btn.innerHTML = texto;
     btn.disabled = disabled;
-    btn.style.cssText = `padding:5px 10px;border:1px solid ${ativo?'#667eea':'#ddd'};border-radius:6px;font-size:13px;` +
-      `cursor:${disabled?'default':'pointer'};background:${ativo?'#667eea':'white'};color:${ativo?'white':disabled?'#ccc':'#555'};min-width:32px;`;
+    btn.style.cssText = `padding:5px 10px;border:1px solid ${ativo ? '#667eea' : '#ddd'};border-radius:6px;font-size:13px;` +
+      `cursor:${disabled ? 'default' : 'pointer'};background:${ativo ? '#667eea' : 'white'};color:${ativo ? 'white' : disabled ? '#ccc' : '#555'};min-width:32px;`;
     if (!disabled && onClick) btn.onclick = onClick;
     return btn;
   }
 
-  navDiv.appendChild(criarBtn('«', pagina===1, false, () => loadNotas(paginacaoState.search, 1)));
-  navDiv.appendChild(criarBtn('‹', pagina===1, false, () => loadNotas(paginacaoState.search, pagina-1)));
+  navDiv.appendChild(criarBtn('«', pagina === 1, false, () => loadNotas(paginacaoState.search, 1)));
+  navDiv.appendChild(criarBtn('‹', pagina === 1, false, () => loadNotas(paginacaoState.search, pagina - 1)));
 
   // Páginas numéricas
   const delta = 2;
   const range = [];
-  for (let i = Math.max(1, pagina-delta); i <= Math.min(totalPaginas, pagina+delta); i++) range.push(i);
+  for (let i = Math.max(1, pagina - delta); i <= Math.min(totalPaginas, pagina + delta); i++) range.push(i);
   if (range[0] > 2) range.unshift('...');
   if (range[0] > 1) range.unshift(1);
-  if (range[range.length-1] < totalPaginas-1) range.push('...');
-  if (range[range.length-1] < totalPaginas) range.push(totalPaginas);
+  if (range[range.length - 1] < totalPaginas - 1) range.push('...');
+  if (range[range.length - 1] < totalPaginas) range.push(totalPaginas);
 
   range.forEach(p => {
     if (p === '...') {
@@ -700,12 +700,12 @@ function renderPaginacao(pag) {
       sp.textContent = '…'; sp.style.cssText = 'padding:0 4px;color:#aaa;font-size:13px;';
       navDiv.appendChild(sp);
     } else {
-      navDiv.appendChild(criarBtn(p, false, p===pagina, p===pagina ? null : () => loadNotas(paginacaoState.search, p)));
+      navDiv.appendChild(criarBtn(p, false, p === pagina, p === pagina ? null : () => loadNotas(paginacaoState.search, p)));
     }
   });
 
-  navDiv.appendChild(criarBtn('›', pagina===totalPaginas, false, () => loadNotas(paginacaoState.search, pagina+1)));
-  navDiv.appendChild(criarBtn('»', pagina===totalPaginas, false, () => loadNotas(paginacaoState.search, totalPaginas)));
+  navDiv.appendChild(criarBtn('›', pagina === totalPaginas, false, () => loadNotas(paginacaoState.search, pagina + 1)));
+  navDiv.appendChild(criarBtn('»', pagina === totalPaginas, false, () => loadNotas(paginacaoState.search, totalPaginas)));
 
   container.append(infoDiv, navDiv);
 
@@ -767,12 +767,12 @@ async function viewNota(id) {
               </tr></thead>
               <tbody>
                 ${nota.produtos.map(p => `<tr>
-                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.numero_item||'—'}</td>
-                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.codigo_produto||'—'}</td>
-                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.descricao||'—'}</td>
-                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.ncm||'—'}</td>
-                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.cfop||'—'}</td>
-                  <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">${p.quantidade||0}</td>
+                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.numero_item || '—'}</td>
+                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.codigo_produto || '—'}</td>
+                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.descricao || '—'}</td>
+                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.ncm || '—'}</td>
+                  <td style="padding:8px;border-bottom:1px solid #eee;">${p.cfop || '—'}</td>
+                  <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">${p.quantidade || 0}</td>
                   <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">${fmt(p.valor_unitario)}</td>
                   <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">${fmt(p.valor_total)}</td>
                 </tr>`).join('')}
@@ -786,28 +786,28 @@ async function viewNota(id) {
       <div style="margin-bottom:20px;padding:15px;background:#f8f9fa;border-radius:8px;">
         <h4 style="margin-bottom:15px;color:#333;">📋 Nota Fiscal</h4>
         <div class="info-grid">
-          <div class="info-item"><div class="info-label">Chave de Acesso</div><div class="info-value" style="font-size:11px;word-break:break-all;">${nota.chave_acesso||'—'}</div></div>
-          <div class="info-item"><div class="info-label">Número / Série</div><div class="info-value">${nota.numero||'—'} / ${nota.serie||'—'}</div></div>
+          <div class="info-item"><div class="info-label">Chave de Acesso</div><div class="info-value" style="font-size:11px;word-break:break-all;">${nota.chave_acesso || '—'}</div></div>
+          <div class="info-item"><div class="info-label">Número / Série</div><div class="info-value">${nota.numero || '—'} / ${nota.serie || '—'}</div></div>
           <div class="info-item"><div class="info-label">Data Emissão</div><div class="info-value">${fmtDT(nota.data_emissao)}</div></div>
-          <div class="info-item"><div class="info-label">Natureza Operação</div><div class="info-value">${nota.natureza_operacao||'—'}</div></div>
-          <div class="info-item"><div class="info-label">Status</div><div class="info-value">${nota.status||'—'}</div></div>
-          <div class="info-item"><div class="info-label">Protocolo</div><div class="info-value">${nota.protocolo_autorizacao||'—'}</div></div>
+          <div class="info-item"><div class="info-label">Natureza Operação</div><div class="info-value">${nota.natureza_operacao || '—'}</div></div>
+          <div class="info-item"><div class="info-label">Status</div><div class="info-value">${nota.status || '—'}</div></div>
+          <div class="info-item"><div class="info-label">Protocolo</div><div class="info-value">${nota.protocolo_autorizacao || '—'}</div></div>
         </div>
       </div>
       <div style="margin-bottom:20px;padding:15px;background:#f8f9fa;border-radius:8px;">
         <h4 style="margin-bottom:15px;color:#333;">🏢 Emitente</h4>
         <div class="info-grid">
-          <div class="info-item"><div class="info-label">Razão Social</div><div class="info-value">${nota.emitente_nome||'—'}</div></div>
-          <div class="info-item"><div class="info-label">CNPJ</div><div class="info-value">${nota.emitente_cnpj||'—'}</div></div>
-          <div class="info-item"><div class="info-label">Inscrição Estadual</div><div class="info-value">${nota.emitente_ie||'—'}</div></div>
+          <div class="info-item"><div class="info-label">Razão Social</div><div class="info-value">${nota.emitente_nome || '—'}</div></div>
+          <div class="info-item"><div class="info-label">CNPJ</div><div class="info-value">${nota.emitente_cnpj || '—'}</div></div>
+          <div class="info-item"><div class="info-label">Inscrição Estadual</div><div class="info-value">${nota.emitente_ie || '—'}</div></div>
         </div>
       </div>
       <div style="margin-bottom:20px;padding:15px;background:#f8f9fa;border-radius:8px;">
         <h4 style="margin-bottom:15px;color:#333;">👤 Destinatário</h4>
         <div class="info-grid">
-          <div class="info-item"><div class="info-label">Razão Social</div><div class="info-value">${nota.destinatario_nome||'—'}</div></div>
-          <div class="info-item"><div class="info-label">CNPJ/CPF</div><div class="info-value">${nota.destinatario_cnpj||'—'}</div></div>
-          <div class="info-item"><div class="info-label">Inscrição Estadual</div><div class="info-value">${nota.destinatario_ie||'—'}</div></div>
+          <div class="info-item"><div class="info-label">Razão Social</div><div class="info-value">${nota.destinatario_nome || '—'}</div></div>
+          <div class="info-item"><div class="info-label">CNPJ/CPF</div><div class="info-value">${nota.destinatario_cnpj || '—'}</div></div>
+          <div class="info-item"><div class="info-label">Inscrição Estadual</div><div class="info-value">${nota.destinatario_ie || '—'}</div></div>
         </div>
       </div>
       ${produtosHtml}
