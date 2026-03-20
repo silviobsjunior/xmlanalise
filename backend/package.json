@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.2",
+    "cookie-parser": "^1.4.7",
+    "crypto": "^1.0.1",
+    "express-session": "^1.19.0"
+  }
+}
