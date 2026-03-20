@@ -480,19 +480,93 @@
         }
 
         /* Responsive */
+        /* =============================================
+           RESPONSIVO — Tablet (≤ 768px)
+        ============================================= */
         @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 12px;
+                padding: 15px 20px;
+                text-align: center;
+            }
+
+            .logo {
+                justify-content: center;
+            }
+
+            .logo h1 {
+                font-size: 20px;
+            }
+
+            .user-section {
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 8px;
+            }
+
+            .tabs {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                flex-wrap: nowrap;
+                scrollbar-width: none;
+            }
+
+            .tabs::-webkit-scrollbar {
+                display: none;
+            }
+
+            .tab {
+                padding: 10px 14px;
+                font-size: 13px;
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
+
+            .card {
+                padding: 16px;
+            }
+
+            .card-title {
+                font-size: 16px;
+            }
+
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
             }
 
             .info-grid {
                 grid-template-columns: 1fr;
             }
 
-            .header {
+            .upload-area {
+                padding: 24px 16px;
+            }
+
+            .upload-text {
+                font-size: 14px;
+            }
+
+            .file-item {
                 flex-direction: column;
-                gap: 15px;
-                text-align: center;
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            .file-actions {
+                width: 100%;
+                display: flex;
+                gap: 8px;
+            }
+
+            .file-actions .btn {
+                flex: 1;
+                justify-content: center;
             }
 
             .login-banner {
@@ -503,6 +577,78 @@
 
             .login-banner button {
                 margin-left: 0;
+            }
+        }
+
+        /* =============================================
+           RESPONSIVO — Mobile (≤ 480px)
+        ============================================= */
+        @media (max-width: 480px) {
+            body {
+                padding: 6px;
+            }
+
+            .header {
+                padding: 12px 14px;
+            }
+
+            .logo img {
+                width: 110px;
+            }
+
+            .logo h1 {
+                font-size: 18px;
+            }
+
+            .tab {
+                padding: 8px 10px;
+                font-size: 12px;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+
+            .stat-card {
+                padding: 12px 10px;
+            }
+
+            .stat-number {
+                font-size: 20px;
+            }
+
+            .btn {
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+
+            .upload-area {
+                padding: 20px 12px;
+            }
+
+            .upload-icon {
+                width: 36px;
+                height: 36px;
+            }
+
+            /* Busca — filtros empilhados */
+            #filtroCidade,
+            #filtroBairro {
+                min-width: 0 !important;
+                width: 100%;
+            }
+
+            /* Cards de vendedor — grid 1 coluna */
+            div[style*="grid-template-columns:1fr 1fr"] {
+                grid-template-columns: 1fr !important;
+            }
+
+            /* Paginação compacta */
+            #paginacaoContainer {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
             }
         }
     </style>
@@ -551,10 +697,10 @@
 
         <!-- Tabs -->
         <div class="tabs">
-            <div class="tab active" data-tab="busca"         onclick="switchTab('busca')">🔍 Buscar Vendedor</div>
-            <div class="tab"        data-tab="upload"        onclick="switchTab('upload')">📤 Upload</div>
-            <div class="tab"        data-tab="arquivos"      onclick="switchTab('arquivos')">📁 Arquivos</div>
-            <div class="tab"        data-tab="estatisticas"  onclick="switchTab('estatisticas')">📊 Estatísticas</div>
+            <div class="tab active" data-tab="busca" onclick="switchTab('busca')">🔍 Buscar Vendedor</div>
+            <div class="tab" data-tab="upload" onclick="switchTab('upload')">📤 Upload</div>
+            <div class="tab" data-tab="arquivos" onclick="switchTab('arquivos')">📁 Arquivos</div>
+            <div class="tab" data-tab="estatisticas" onclick="switchTab('estatisticas')">📊 Estatísticas</div>
         </div>
 
         <!-- Busca Tab -->
@@ -635,8 +781,10 @@
                     </button>
                 </div>
                 <!-- Dica: diálogo de confirmação aparecerá ao selecionar arquivos -->
-                <div style="margin-top:14px; padding:10px 14px; background:#f0f2ff; border-radius:8px; border:1px solid #d0d5f5; font-size:12px; color:#555;">
-                    💡 Após selecionar os arquivos, você indicará se é <strong>comprador</strong>, <strong>vendedor</strong> ou <strong>revendedor</strong> antes de importar.
+                <div
+                    style="margin-top:14px; padding:10px 14px; background:#f0f2ff; border-radius:8px; border:1px solid #d0d5f5; font-size:12px; color:#555;">
+                    💡 Após selecionar os arquivos, você indicará se é <strong>comprador</strong>,
+                    <strong>vendedor</strong> ou <strong>revendedor</strong> antes de importar.
                 </div>
                 <p style="text-align: center; margin-top: 10px; font-size: 12px; color: #999;">
                     ⚡ Arquivos inválidos serão ignorados automaticamente
@@ -711,16 +859,16 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
-    function switchTab(tabName) {
-        document.querySelectorAll('.tab').forEach(t =>
-            t.classList.toggle('active', t.dataset.tab === tabName));
-        document.querySelectorAll('.tab-content').forEach(c =>
-            c.style.display = 'none');
-        var el = document.getElementById(tabName + 'Tab');
-        if (el) el.style.display = 'block';
-        if (tabName === 'arquivos' && typeof loadNotas === 'function') loadNotas();
-        if (tabName === 'estatisticas' && typeof loadStatistics === 'function') loadStatistics();
-    }
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t =>
+                t.classList.toggle('active', t.dataset.tab === tabName));
+            document.querySelectorAll('.tab-content').forEach(c =>
+                c.style.display = 'none');
+            var el = document.getElementById(tabName + 'Tab');
+            if (el) el.style.display = 'block';
+            if (tabName === 'arquivos' && typeof loadNotas === 'function') loadNotas();
+            if (tabName === 'estatisticas' && typeof loadStatistics === 'function') loadStatistics();
+        }
     </script>
     <script src="app.js"></script>
 </body>
