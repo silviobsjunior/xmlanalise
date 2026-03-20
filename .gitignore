@@ -1,0 +1,52 @@
+
+# Criar .gitignore com tudo que deve ser ignorado
+cat > .gitignore << 'EOF'
+# Secrets and credentials
+*.client_secret_*.json
+*.json
+.env
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+.server_pids
+
+# Firebase
+.firebase/
+.firebase
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.production
+
+# dbt / target (não commitar arquivos gerados)
+target/
+dbt_packages/
+logs/
+
+# Python
+*.pyc
+__pycache__/
