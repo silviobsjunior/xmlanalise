@@ -565,108 +565,204 @@ app.get('/api/produtos/periodo/:periodo', async (req, res) => {
     console.log(`\n${getTimestamp()} 📊 CONSULTANDO PRODUTOS POR PERÍODO`);
 
     const { periodo } = req.params;
-    const { formato = 'json' } = req.query;
+    const { formato = 'json', temporal = 'false', agrupamento } = req.query;
 
-    // Parse período (10m, 1h, 3d)
-    let horas = 0;
-    let dias = 0;
-    let minutos = 0;
+    // Parse período (10m, 1h, 3d, all)
+    let dataCorte = null;
+    let periodoLabel = 'todos';
 
     if (periodo !== 'all') {
         const valor = parseInt(periodo.slice(0, -1));
         const unidade = periodo.slice(-1).toLowerCase();
 
-        if (unidade === 'm') minutos = valor;
-        else if (unidade === 'h') horas = valor;
-        else if (unidade === 'd') dias = valor;
-        else {
+        dataCorte = new Date();
+
+        if (unidade === 'm') {
+            dataCorte.setMinutes(dataCorte.getMinutes() - valor);
+            periodoLabel = `${valor}m`;
+        } else if (unidade === 'h') {
+            dataCorte.setHours(dataCorte.getHours() - valor);
+            periodoLabel = `${valor}h`;
+        } else if (unidade === 'd') {
+            dataCorte.setDate(dataCorte.getDate() - valor);
+            periodoLabel = `${valor}d`;
+        } else {
             return res.status(400).json({
-                erro: 'Formato inválido. Use: 10m, 1h, 3d ou all'
+                erro: 'Formato inválido. Use: 10m, 1h, 3d, all'
             });
         }
     }
 
     try {
+        // Consulta SIMPLES: apenas produtos_nfe
         let query = supabase
             .from('produtos_nfe')
-            .select(`
-                id,
-                codigo_barras,
-                descricao,
-                ncm,
-                created_at,
-                nfe_importadas (
-                    chave_acesso,
-                    data_emissao,
-                    notas_fiscais (
-                        emitente_id,
-                        destinatario_id
-                    )
-                )
-            `);
+            .select('*');
 
         // Aplicar filtro de período
-        if (periodo !== 'all') {
-            const dataCorte = new Date();
-            dataCorte.setMinutes(dataCorte.getMinutes() - minutos);
-            dataCorte.setHours(dataCorte.getHours() - horas);
-            dataCorte.setDate(dataCorte.getDate() - dias);
-
+        if (dataCorte) {
             query = query.gte('created_at', dataCorte.toISOString());
+            console.log(`${getTimestamp()} 🕐 Produtos após: ${dataCorte.toISOString()}`);
         }
 
         const { data, error } = await query;
 
-        if (error) throw error;
+        if (error) {
+            console.error(`${getTimestamp()} ❌ Erro na consulta:`, error);
+            throw error;
+        }
 
-        // Agrupar estatísticas
-        const stats = {
-            total: data.length,
-            por_ncm: {},
-            por_hora: {},
-            ultimos_10: []
-        };
+        const produtos = data || [];
+        console.log(`${getTimestamp()} ✅ ${produtos.length} produtos encontrados`);
 
-        data.forEach(prod => {
-            // Por NCM
-            const ncm = prod.ncm || 'SEM_NCM';
-            stats.por_ncm[ncm] = (stats.por_ncm[ncm] || 0) + 1;
+        // Se for modo temporal (agrupado)
+        if (temporal === 'true') {
+            // Determinar agrupamento automático
+            let intervalo = agrupamento;
+            if (!intervalo) {
+                if (periodoLabel.includes('m')) intervalo = 'minuto';
+                else if (periodoLabel.includes('h')) intervalo = 'hora';
+                else if (periodoLabel.includes('d')) {
+                    const dias = parseInt(periodoLabel);
+                    if (dias >= 30) intervalo = 'mes';
+                    else if (dias >= 7) intervalo = 'dia';
+                    else intervalo = 'hora';
+                } else intervalo = 'dia';
+            }
 
-            // Por hora
-            const hora = prod.created_at?.slice(0, 13) || 'N/A';
-            stats.por_hora[hora] = (stats.por_hora[hora] || 0) + 1;
-        });
+            // Agrupar produtos
+            const agrupado = {};
 
-        // Últimos 10 produtos
-        stats.ultimos_10 = data.slice(-10).reverse().map(p => ({
+            for (const p of produtos) {
+                const created = p.created_at;
+                if (!created) continue;
+
+                const dt = new Date(created);
+                let chave;
+
+                if (intervalo === 'minuto') {
+                    chave = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+                } else if (intervalo === 'hora') {
+                    chave = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')} ${String(dt.getHours()).padStart(2, '0')}:00`;
+                } else if (intervalo === 'dia') {
+                    chave = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                } else {
+                    chave = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+                }
+
+                agrupado[chave] = (agrupado[chave] || 0) + 1;
+            }
+
+            // Calcular estatísticas
+            const valores = Object.values(agrupado);
+            const media = valores.length ? (valores.reduce((a, b) => a + b, 0) / valores.length).toFixed(1) : 0;
+            const maximo = Math.max(...valores, 0);
+            const minimo = Math.min(...valores, Infinity);
+
+            // Preparar resultado temporal
+            const resultadoTemporal = {
+                sucesso: true,
+                periodo: periodoLabel,
+                intervalo: intervalo,
+                total_produtos: produtos.length,
+                distribuicao: Object.entries(agrupado)
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([intervalo, quantidade]) => ({ intervalo, quantidade })),
+                estatisticas: {
+                    media_por_intervalo: parseFloat(media),
+                    maximo_intervalo: maximo,
+                    minimo_intervalo: minimo,
+                    total_intervalos: Object.keys(agrupado).length
+                }
+            };
+
+            if (formato === 'csv') {
+                let csv = 'intervalo,quantidade\n';
+                for (const [intervalo, qtd] of Object.entries(agrupado).sort()) {
+                    csv += `"${intervalo}",${qtd}\n`;
+                }
+                res.header('Content-Type', 'text/csv');
+                res.header('Content-Disposition', `attachment; filename=produtos_temporal_${periodoLabel}.csv`);
+                return res.send(csv);
+            }
+
+            return res.json(resultadoTemporal);
+        }
+
+        // Modo SIMPLES - estatísticas
+        const porNcm = {};
+        const porDescricao = {};
+
+        for (const p of produtos) {
+            const ncm = p.ncm || 'SEM_NCM';
+            porNcm[ncm] = (porNcm[ncm] || 0) + 1;
+
+            const desc = (p.descricao || 'SEM_DESCRICAO').substring(0, 50);
+            porDescricao[desc] = (porDescricao[desc] || 0) + 1;
+        }
+
+        // Top NCMs
+        const topNcm = Object.entries(porNcm)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([ncm, qtd]) => ({ ncm, quantidade: qtd }));
+
+        // Top Produtos
+        const topProdutos = Object.entries(porDescricao)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([desc, qtd]) => ({ descricao: desc, ocorrencias: qtd }));
+
+        // Amostra dos últimos produtos
+        const ultimosProdutos = produtos.slice(-5).reverse().map(p => ({
             descricao: p.descricao,
             codigo_barras: p.codigo_barras,
             ncm: p.ncm,
             criado_em: p.created_at
         }));
 
-        // Top 10 NCMs
-        stats.top_ncm = Object.entries(stats.por_ncm)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10)
-            .map(([ncm, qtd]) => ({ ncm, quantidade: qtd }));
+        const resultado = {
+            sucesso: true,
+            periodo: periodoLabel,
+            data_consulta: new Date().toISOString(),
+            total_produtos: produtos.length,
+            ncm_distintas: Object.keys(porNcm).length,
+            produtos_distintos: Object.keys(porDescricao).length,
+            top_ncm: topNcm,
+            top_produtos: topProdutos,
+            ultimos_produtos: ultimosProdutos,
+            estatisticas: {}
+        };
 
-        if (formato === 'csv') {
-            // Gerar CSV
-            let csv = 'descricao,codigo_barras,ncm,created_at\n';
-            data.forEach(p => {
-                csv += `"${p.descricao || ''}","${p.codigo_barras || ''}","${p.ncm || ''}","${p.created_at || ''}"\n`;
-            });
-            res.header('Content-Type', 'text/csv');
-            res.send(csv);
-        } else {
-            res.json({
-                sucesso: true,
-                periodo: periodo,
-                data_consulta: new Date().toISOString(),
-                estatisticas: stats
-            });
+        // Calcular médias se houver período
+        if (dataCorte) {
+            const horas = (new Date() - dataCorte) / (1000 * 3600);
+            if (horas < 24) {
+                resultado.estatisticas.media_por_hora = (produtos.length / horas).toFixed(1);
+            } else {
+                const dias = horas / 24;
+                resultado.estatisticas.media_por_dia = (produtos.length / dias).toFixed(1);
+            }
         }
+
+        // Exportar CSV se solicitado
+        if (formato === 'csv') {
+            const columns = ['id', 'codigo_barras', 'descricao', 'ncm', 'created_at'];
+            let csv = columns.join(',') + '\n';
+            for (const p of produtos) {
+                const row = columns.map(col => {
+                    const val = p[col] || '';
+                    return `"${String(val).replace(/"/g, '""')}"`;
+                }).join(',');
+                csv += row + '\n';
+            }
+            res.header('Content-Type', 'text/csv');
+            res.header('Content-Disposition', `attachment; filename=produtos_${periodoLabel}.csv`);
+            return res.send(csv);
+        }
+
+        // JSON padrão
+        res.json(resultado);
 
     } catch (error) {
         console.error(`${getTimestamp()} ❌ Erro na consulta:`, error);
