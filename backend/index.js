@@ -559,6 +559,126 @@ app.post('/auth/logout', async (req, res) => {
 });
 
 // =============================================
+// ENDPOINT PARA CONSULTAR PRODUTOS POR PERÍODO
+// =============================================
+app.get('/api/produtos/periodo/:periodo', async (req, res) => {
+    console.log(`\n${getTimestamp()} 📊 CONSULTANDO PRODUTOS POR PERÍODO`);
+
+    const { periodo } = req.params;
+    const { formato = 'json' } = req.query;
+
+    // Parse período (10m, 1h, 3d)
+    let horas = 0;
+    let dias = 0;
+    let minutos = 0;
+
+    if (periodo !== 'all') {
+        const valor = parseInt(periodo.slice(0, -1));
+        const unidade = periodo.slice(-1).toLowerCase();
+
+        if (unidade === 'm') minutos = valor;
+        else if (unidade === 'h') horas = valor;
+        else if (unidade === 'd') dias = valor;
+        else {
+            return res.status(400).json({
+                erro: 'Formato inválido. Use: 10m, 1h, 3d ou all'
+            });
+        }
+    }
+
+    try {
+        let query = supabase
+            .from('produtos_nfe')
+            .select(`
+                id,
+                codigo_barras,
+                descricao,
+                ncm,
+                created_at,
+                nfe_importadas (
+                    chave_acesso,
+                    data_emissao,
+                    notas_fiscais (
+                        emitente_id,
+                        destinatario_id
+                    )
+                )
+            `);
+
+        // Aplicar filtro de período
+        if (periodo !== 'all') {
+            const dataCorte = new Date();
+            dataCorte.setMinutes(dataCorte.getMinutes() - minutos);
+            dataCorte.setHours(dataCorte.getHours() - horas);
+            dataCorte.setDate(dataCorte.getDate() - dias);
+
+            query = query.gte('created_at', dataCorte.toISOString());
+        }
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        // Agrupar estatísticas
+        const stats = {
+            total: data.length,
+            por_ncm: {},
+            por_hora: {},
+            ultimos_10: []
+        };
+
+        data.forEach(prod => {
+            // Por NCM
+            const ncm = prod.ncm || 'SEM_NCM';
+            stats.por_ncm[ncm] = (stats.por_ncm[ncm] || 0) + 1;
+
+            // Por hora
+            const hora = prod.created_at?.slice(0, 13) || 'N/A';
+            stats.por_hora[hora] = (stats.por_hora[hora] || 0) + 1;
+        });
+
+        // Últimos 10 produtos
+        stats.ultimos_10 = data.slice(-10).reverse().map(p => ({
+            descricao: p.descricao,
+            codigo_barras: p.codigo_barras,
+            ncm: p.ncm,
+            criado_em: p.created_at
+        }));
+
+        // Top 10 NCMs
+        stats.top_ncm = Object.entries(stats.por_ncm)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10)
+            .map(([ncm, qtd]) => ({ ncm, quantidade: qtd }));
+
+        if (formato === 'csv') {
+            // Gerar CSV
+            let csv = 'descricao,codigo_barras,ncm,created_at\n';
+            data.forEach(p => {
+                csv += `"${p.descricao || ''}","${p.codigo_barras || ''}","${p.ncm || ''}","${p.created_at || ''}"\n`;
+            });
+            res.header('Content-Type', 'text/csv');
+            res.send(csv);
+        } else {
+            res.json({
+                sucesso: true,
+                periodo: periodo,
+                data_consulta: new Date().toISOString(),
+                estatisticas: stats
+            });
+        }
+
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro na consulta:`, error);
+        res.status(500).json({
+            sucesso: false,
+            erro: 'Erro ao consultar produtos',
+            detalhes: error.message
+        });
+    }
+});
+
+// =============================================
 // ENDPOINT DE DEBUG
 // =============================================
 app.get('/api/debug-sessao', (req, res) => {
@@ -719,15 +839,17 @@ app.get('/api/buscar-produtos', async (req, res) => {
         const map = new Map();
         rows.forEach(row => {
             const k = row.vendedor_cnpj; if (!k) return;
-            if (!map.has(k)) map.set(k, { vendedor: {
-                cnpj: row.vendedor_cnpj, razao_social: row.vendedor_razao_social,
-                nome_fantasia: row.vendedor_nome_fantasia,
-                logradouro: row.vendedor_logradouro, numero: row.vendedor_numero,
-                complemento: row.vendedor_complemento, bairro: row.vendedor_bairro,
-                cidade: row.vendedor_cidade, uf: row.vendedor_uf,
-                cep: row.vendedor_cep, telefone: row.vendedor_telefone,
-                ultima_venda: row.data_emissao
-            }, produtos: [] });
+            if (!map.has(k)) map.set(k, {
+                vendedor: {
+                    cnpj: row.vendedor_cnpj, razao_social: row.vendedor_razao_social,
+                    nome_fantasia: row.vendedor_nome_fantasia,
+                    logradouro: row.vendedor_logradouro, numero: row.vendedor_numero,
+                    complemento: row.vendedor_complemento, bairro: row.vendedor_bairro,
+                    cidade: row.vendedor_cidade, uf: row.vendedor_uf,
+                    cep: row.vendedor_cep, telefone: row.vendedor_telefone,
+                    ultima_venda: row.data_emissao
+                }, produtos: []
+            });
             const en = map.get(k);
             if (row.data_emissao > en.vendedor.ultima_venda) en.vendedor.ultima_venda = row.data_emissao;
             if (!en.produtos.some(p => p.cean === row.cean && p.descricao === row.descricao_produto))
