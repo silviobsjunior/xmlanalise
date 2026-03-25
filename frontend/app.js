@@ -7,6 +7,7 @@ let currentUser = null;
 let currentToken = null;
 let perspectivaPadrao = 'consumidor'; // 'consumidor' | 'emitente' | 'revendedor'
 let configCache = null;
+let userIsAdmin = false;
 
 // Dados dos filtros carregados uma vez
 let todosOsBairros = [];
@@ -57,9 +58,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupEventListeners();
   await carregarFiltros();
+  await carregarEstatisticasGerais();
 
   // Aba busca é a padrão — não carrega notas/stats até o usuário trocar de aba
 });
+
+// ============================================================
+// AUTENTICAÇÃO E PERMISSÕES
+// ============================================================
+async function verificarAdmin() {
+  if (!currentToken) {
+    userIsAdmin = false;
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/api/debug-sessao`, {
+      headers: { 'Authorization': `Bearer ${currentToken}` }
+    });
+    const data = await res.json();
+    userIsAdmin = data.userInfo?.isAdmin || false;
+    console.log('👑 Admin status:', userIsAdmin);
+  } catch (e) {
+    userIsAdmin = false;
+  }
+}
 
 // ============================================================
 // AUTENTICAÇÃO
@@ -72,6 +94,7 @@ async function initAuth() {
     if (session?.user) {
       currentUser = session.user;
       currentToken = session.access_token;
+      await verificarAdmin();
       showUserLoggedIn(session.user);
     } else {
       showAnonymousUser();
@@ -85,6 +108,7 @@ async function initAuth() {
     if (event === 'SIGNED_IN' && session?.user) {
       currentUser = session.user;
       currentToken = session.access_token;
+      await verificarAdmin();
       showUserLoggedIn(session.user);
       const sessionId = getAnonymousSessionId();
       if (sessionId) await migrarDadosAnonimos(sessionId);
@@ -92,10 +116,12 @@ async function initAuth() {
     } else if (event === 'SIGNED_OUT') {
       currentUser = null;
       currentToken = null;
+      userIsAdmin = false;
       showAnonymousUser();
       showToast('Logout realizado', 'success');
     } else if (event === 'TOKEN_REFRESHED' && session) {
       currentToken = session.access_token;
+      await verificarAdmin();
     }
   });
 }

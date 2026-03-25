@@ -58,6 +58,8 @@ pool.on('error', (err) => {
 // =============================================
 // FUNÇÃO PARA GARANTIR QUE USUÁRIO EXISTE NO BANCO LOCAL
 // =============================================
+// FUNÇÃO PARA GARANTIR QUE USUÁRIO EXISTE NO BANCO LOCAL
+// =============================================
 async function garantirUsuarioLocal(user, userAgent = null) {
     if (!user || !user.id) return null;
 
@@ -73,7 +75,6 @@ async function garantirUsuarioLocal(user, userAgent = null) {
 
         if (!tableCheck.rows[0].exists) {
             console.error(`${getTimestamp()} ❌ Tabela 'usuarios' não existe no banco de dados!`);
-            console.log(`${getTimestamp()} 📝 Execute o script SQL para criar a tabela usuarios`);
             return null;
         }
 
@@ -85,22 +86,40 @@ async function garantirUsuarioLocal(user, userAgent = null) {
         `);
 
         const existingColumns = columnsCheck.rows.map(row => row.column_name);
-        console.log(`${getTimestamp()} 📊 Colunas existentes em usuarios:`, existingColumns.join(', '));
+        
+        // Garantir que a coluna is_admin existe
+        if (!existingColumns.includes('is_admin')) {
+            try {
+                await pool.query('ALTER TABLE usuarios ADD COLUMN is_admin BOOLEAN DEFAULT FALSE');
+                existingColumns.push('is_admin');
+                console.log(`${getTimestamp()} ➕ Coluna 'is_admin' adicionada à tabela usuarios`);
+            } catch (e) {
+                console.error(`${getTimestamp()} ⚠️ Erro ao adicionar coluna is_admin:`, e.message);
+            }
+        }
 
         // Verificar se usuário já existe
         const { rows: existingUsers } = await pool.query(
-            `SELECT id FROM usuarios WHERE id = $1`,
+            `SELECT id, is_admin FROM usuarios WHERE id = $1`,
             [user.id]
         );
 
         if (existingUsers.length === 0) {
-            // Usuário não existe, criar com as colunas disponíveis
+            // Usuário não existe, criar
             console.log(`${getTimestamp()} 👤 Criando usuário local:`, user.email);
 
-            // Construir query dinamicamente baseada nas colunas existentes
             const fields = ['id', 'email', 'nome'];
             const values = [user.id, user.email, user.user_metadata?.full_name || user.email];
             const placeholders = ['$1', '$2', '$3'];
+
+            // Admins por padrão
+            const isAdmin = user.email === 'contato@santanaecia.com.br' || user.email === 'silviobsjunior@gmail.com';
+
+            if (existingColumns.includes('is_admin')) {
+                fields.push('is_admin');
+                values.push(isAdmin);
+                placeholders.push(`$${values.length}`);
+            }
 
             if (existingColumns.includes('avatar_url')) {
                 fields.push('avatar_url');
@@ -108,94 +127,20 @@ async function garantirUsuarioLocal(user, userAgent = null) {
                 placeholders.push(`$${values.length}`);
             }
 
-            if (existingColumns.includes('created_at')) {
-                fields.push('created_at');
-                values.push(new Date().toISOString());
-                placeholders.push(`$${values.length}`);
-            }
-
-            if (existingColumns.includes('updated_at')) {
-                fields.push('updated_at');
-                values.push(new Date().toISOString());
-                placeholders.push(`$${values.length}`);
-            }
-
-            if (existingColumns.includes('ultimo_login')) {
-                fields.push('ultimo_login');
-                values.push(new Date().toISOString());
-                placeholders.push(`$${values.length}`);
-            }
-
-            const insertQuery = `
-                INSERT INTO usuarios (${fields.join(', ')})
-                VALUES (${placeholders.join(', ')})
-            `;
-
+            const insertQuery = `INSERT INTO usuarios (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`;
             await pool.query(insertQuery, values);
-            console.log(`${getTimestamp()} ✅ Usuário local criado com sucesso:`, user.id);
+            console.log(`${getTimestamp()} ✅ Usuário local criado:`, user.id);
+            return { id: user.id, isAdmin };
         } else {
-            // Usuário existe, atualizar último login se a coluna existir
-            console.log(`${getTimestamp()} 🔄 Usuário já existe, atualizando último login:`, user.id);
-
-            if (existingColumns.includes('ultimo_login')) {
-                await pool.query(
-                    `UPDATE usuarios 
-                     SET ultimo_login = NOW(), 
-                         updated_at = NOW(),
-                         email = $2,
-                         nome = $3
-                     WHERE id = $1`,
-                    [
-                        user.id,
-                        user.email,
-                        user.user_metadata?.full_name || user.email
-                    ]
-                );
-            } else {
-                // Se não tiver ultimo_login, pelo menos atualiza email e nome
-                await pool.query(
-                    `UPDATE usuarios 
-                     SET email = $2, nome = $3
-                     WHERE id = $1`,
-                    [
-                        user.id,
-                        user.email,
-                        user.user_metadata?.full_name || user.email
-                    ]
-                );
-            }
+            // Usuário existe, atualizar
+            await pool.query(
+                `UPDATE usuarios SET ultimo_login = NOW(), updated_at = NOW(), email = $2, nome = $3 WHERE id = $1`,
+                [user.id, user.email, user.user_metadata?.full_name || user.email]
+            );
+            return { id: user.id, isAdmin: existingUsers[0].is_admin || false };
         }
-
-        // Atualizar atividade se a tabela existir
-        try {
-            const atividadeTableCheck = await pool.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'usuarios_atividade'
-                );
-            `);
-
-            if (atividadeTableCheck.rows[0].exists && userAgent) {
-                await pool.query(
-                    `INSERT INTO usuarios_atividade (user_id, ultima_atividade, user_agent) 
-                     VALUES ($1, $2, $3)
-                     ON CONFLICT (user_id) 
-                     DO UPDATE SET ultima_atividade = $2, user_agent = $3`,
-                    [user.id, new Date().toISOString(), userAgent]
-                );
-            }
-        } catch (atividadeError) {
-            // Ignora erro da tabela de atividade
-            console.log(`${getTimestamp()} ⚠️ Não foi possível atualizar atividade:`, atividadeError.message);
-        }
-
-        return user.id;
     } catch (error) {
         console.error(`${getTimestamp()} ❌ Erro ao garantir usuário local:`, error.message);
-        if (error.message.includes('does not exist')) {
-            console.log(`${getTimestamp()} 📝 Execute o script SQL para criar as tabelas necessárias`);
-        }
         return null;
     }
 }
@@ -316,89 +261,35 @@ app.use((req, res, next) => {
 // MIDDLEWARE DE SESSÃO
 // =============================================
 app.use(async (req, res, next) => {
-    // Pular rotas de auth
-    if (req.path === '/auth/google' || req.path === '/auth/callback') {
-        console.log(`${getTimestamp()} 🔓 Rota de auth ignorada pelo middleware de sessão`);
+    // Pular rotas de auth e config
+    if (req.path === '/auth/google' || req.path === '/auth/callback' || req.path === '/api/config') {
         return next();
     }
 
     try {
-        console.log(`${getTimestamp()} 🔍 EXECUTANDO MIDDLEWARE DE SESSÃO`);
-
         // Verificar token no header
         const authHeader = req.headers.authorization;
-        console.log(`${getTimestamp()} Token no header: ${authHeader ? 'PRESENTE' : 'AUSENTE'}`);
 
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const token = authHeader.replace('Bearer ', '');
-            console.log(`${getTimestamp()} Token (primeiros 20 chars): ${token.substring(0, 20)}...`);
 
             try {
-                console.log(`${getTimestamp()} 🔄 Verificando token no Supabase...`);
                 const { data: { user }, error } = await supabase.auth.getUser(token);
 
-                if (error) {
-                    console.log(`${getTimestamp()} ❌ Erro na verificação do token:`, error.message);
-                }
-
                 if (user && !error) {
-                    console.log(`${getTimestamp()} ✅ USUÁRIO AUTENTICADO VIA TOKEN:`);
-                    console.log(`${getTimestamp()}   - ID: ${user.id}`);
-                    console.log(`${getTimestamp()}   - Email: ${user.email}`);
-                    console.log(`${getTimestamp()}   - Nome: ${user.user_metadata?.full_name || 'N/A'}`);
-
                     // GARANTIR QUE USUÁRIO EXISTE NO BANCO LOCAL
-                    const usuarioLocalId = await garantirUsuarioLocal(user, req.headers['user-agent']);
+                    const usuarioLocal = await garantirUsuarioLocal(user, req.headers['user-agent']);
 
-                    if (!usuarioLocalId) {
-                        console.log(`${getTimestamp()} ⚠️ Falha ao garantir usuário local, usando modo anônimo`);
-                        // Fallback para anônimo se falhar
-                        let sessionId = req.cookies.anonymousSessionId;
-                        if (!sessionId) {
-                            sessionId = crypto.randomUUID();
-                            console.log(`${getTimestamp()} 🆕 Nova sessão anônima criada: ${sessionId}`);
-
-                            // Registra no banco
-                            try {
-                                await pool.query(
-                                    `INSERT INTO sessoes_anonimas (session_id, data_criacao, ultima_atividade, user_agent, ip_address) 
-                                     VALUES ($1, $2, $3, $4, $5)`,
-                                    [sessionId, new Date().toISOString(), new Date().toISOString(),
-                                        req.headers['user-agent'] || 'unknown', req.ip || 'unknown']
-                                );
-                                console.log(`${getTimestamp()} 📊 Sessão anônima registrada no banco`);
-                            } catch (dbError) {
-                                console.error(`${getTimestamp()} Erro ao registrar sessão:`, dbError.message);
-                            }
-
-                            // Define cookie
-                            res.cookie('anonymousSessionId', sessionId, {
-                                maxAge: 30 * 24 * 60 * 60 * 1000,
-                                httpOnly: true,
-                                secure: false,
-                                sameSite: 'lax',
-                                path: '/',
-                                secure: req.secure || req.headers['x-forwarded-proto'] === 'https'
-                            });
-                            console.log(`${getTimestamp()} 🍪 Cookie de sessão anônima definido`);
-                        }
-
+                    if (usuarioLocal) {
                         req.userInfo = {
-                            type: 'anonymous',
-                            id: sessionId
+                            type: 'user',
+                            id: user.id,
+                            email: user.email,
+                            name: user.user_metadata?.full_name || user.email,
+                            isAdmin: usuarioLocal.isAdmin
                         };
                         return next();
                     }
-
-                    req.userInfo = {
-                        type: 'user',
-                        id: user.id,
-                        email: user.email,
-                        name: user.user_metadata?.full_name || user.email
-                    };
-
-                    // Atividade já foi registrada na função garantirUsuarioLocal
-                    return next();
                 }
             } catch (authError) {
                 console.error(`${getTimestamp()} ❌ Erro na autenticação:`, authError.message);
@@ -406,66 +297,33 @@ app.use(async (req, res, next) => {
         }
 
         // Se não está logado, gerencia sessão anônima
-        console.log(`${getTimestamp()} 👤 USUÁRIO ANÔNIMO`);
         let sessionId = req.cookies.anonymousSessionId;
-        console.log(`${getTimestamp()} Cookie sessionId: ${sessionId || 'AUSENTE'}`);
 
         if (!sessionId) {
             sessionId = crypto.randomUUID();
-            console.log(`${getTimestamp()} 🆕 Nova sessão anônima criada: ${sessionId}`);
-
-            // Registra no banco
-            try {
-                await pool.query(
-                    `INSERT INTO sessoes_anonimas (session_id, data_criacao, ultima_atividade, user_agent, ip_address) 
-                     VALUES ($1, $2, $3, $4, $5)`,
-                    [sessionId, new Date().toISOString(), new Date().toISOString(),
-                        req.headers['user-agent'] || 'unknown', req.ip || 'unknown']
-                );
-                console.log(`${getTimestamp()} 📊 Sessão anônima registrada no banco`);
-            } catch (dbError) {
-                console.error(`${getTimestamp()} Erro ao registrar sessão:`, dbError.message);
-            }
-
-            // Define cookie
             res.cookie('anonymousSessionId', sessionId, {
                 maxAge: 30 * 24 * 60 * 60 * 1000,
                 httpOnly: true,
-                secure: false,
+                secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
                 sameSite: 'lax',
-                path: '/',
-                secure: req.secure || req.headers['x-forwarded-proto'] === 'https'
+                path: '/'
             });
-            console.log(`${getTimestamp()} 🍪 Cookie de sessão anônima definido`);
-        } else {
-            console.log(`${getTimestamp()} 🔄 Sessão anônima existente: ${sessionId}`);
-            // Atualiza última atividade
-            try {
-                await pool.query(
-                    `UPDATE sessoes_anonimas 
-                     SET ultima_atividade = $1, user_agent = $2
-                     WHERE session_id = $3`,
-                    [new Date().toISOString(), req.headers['user-agent'] || 'unknown', sessionId]
-                );
-                console.log(`${getTimestamp()} 📊 Atividade da sessão atualizada`);
-            } catch (dbError) {
-                console.error(`${getTimestamp()} Erro ao atualizar sessão:`, dbError.message);
-            }
         }
 
         req.userInfo = {
             type: 'anonymous',
-            id: sessionId
+            id: sessionId,
+            isAdmin: false
         };
 
-        console.log(`${getTimestamp()} ✅ Sessão configurada, continuando...`);
         next();
 
     } catch (error) {
         console.error(`${getTimestamp()} ❌ ERRO NO MIDDLEWARE DE SESSÃO:`, error.message);
         req.userInfo = {
             type: 'anonymous',
-            id: crypto.randomUUID()
+            id: crypto.randomUUID(),
+            isAdmin: false
         };
         next();
     }
@@ -838,6 +696,51 @@ app.get('/api/test-token', async (req, res) => {
 });
 
 // =============================================
+// ESTATÍSTICAS GERAIS COM CACHE
+// =============================================
+let statsCache = {
+    data: null,
+    lastUpdate: null,
+    nextUpdate: null
+};
+
+app.get('/api/estatisticas-gerais', async (req, res) => {
+    const CACHE_DURATION = 60 * 60 * 1000; // 1 hora
+    const now = Date.now();
+
+    if (statsCache.data && statsCache.nextUpdate && now < new Date(statsCache.nextUpdate).getTime()) {
+        return res.json({ ...statsCache.data, cached: true, lastUpdate: statsCache.lastUpdate, nextUpdate: statsCache.nextUpdate });
+    }
+
+    try {
+        const { rows: stats } = await pool.query(`
+            SELECT 
+                (SELECT COUNT(*) FROM produtos_nfe) as total_produtos,
+                (SELECT COUNT(*) FROM emitentes) as total_fornecedores,
+                (SELECT COUNT(DISTINCT municipio) FROM emitentes WHERE municipio IS NOT NULL AND municipio != '') as total_cidades
+        `);
+
+        const data = {
+            sucesso: true,
+            total_produtos: parseInt(stats[0].total_produtos),
+            total_fornecedores: parseInt(stats[0].total_fornecedores),
+            total_cidades: parseInt(stats[0].total_cidades)
+        };
+
+        statsCache = {
+            data: data,
+            lastUpdate: new Date(now).toISOString(),
+            nextUpdate: new Date(now + CACHE_DURATION).toISOString()
+        };
+
+        res.json({ ...data, cached: false, lastUpdate: statsCache.lastUpdate, nextUpdate: statsCache.nextUpdate });
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro estatísticas gerais:`, error);
+        res.status(500).json({ sucesso: false, erro: 'Erro ao carregar estatísticas' });
+    }
+});
+
+// =============================================
 // ENDPOINT PARA FILTROS DISPONÍVEIS (cidades e bairros)
 // =============================================
 app.get('/api/filtros-vendedores', async (req, res) => {
@@ -1011,10 +914,10 @@ app.get('/api/minhas-notas', async (req, res) => {
 });
 
 // =============================================
-// ENDPOINT PARA DETALHES DE UMA NOTA ESPECÍFICA
+// ENDPOINT PARA DETALHES DE UMA NOTA ESPECÍFICA (RESTRITO)
 // =============================================
 app.get('/api/minha-nota/:id', async (req, res) => {
-    console.log(`\n${getTimestamp()} 📄 BUSCANDO NOTA ESPECÍFICA`);
+    console.log(`\n${getTimestamp()} 📄 BUSCANDO NOTA ESPECÍFICA (RESTRITO)`);
     console.log(`${getTimestamp()} ID:`, req.params.id);
 
     try {
@@ -1027,7 +930,8 @@ app.get('/api/minha-nota/:id', async (req, res) => {
             });
         }
 
-        const query = `
+        // Se NÃO for admin, só pode ver se for a PRÓPRIA nota, mas vamos aplicar a restrição solicitada
+        let query = `
             SELECT nf.*, 
                    a_emit.razao_social as emitente_nome, 
                    a_emit.identificador as emitente_cnpj,
@@ -1038,13 +942,27 @@ app.get('/api/minha-nota/:id', async (req, res) => {
             FROM notas_fiscais nf
             LEFT JOIN atores a_emit ON nf.emitente_id = a_emit.id
             LEFT JOIN atores a_dest ON nf.destinatario_id = a_dest.id
-            WHERE nf.id = $1 AND nf.usuario_id = $2
+            WHERE nf.id = $1
         `;
+        let params = [id];
 
-        const { rows } = await pool.query(query, [id, userInfo.id]);
+        if (!userInfo.isAdmin) {
+            query += ' AND nf.usuario_id = $2';
+            params.push(userInfo.id);
+        }
+
+        const { rows } = await pool.query(query, params);
 
         if (rows.length === 0) {
-            return res.status(404).json({ erro: 'Nota fiscal não encontrada' });
+            return res.status(404).json({ erro: 'Nota fiscal não encontrada ou acesso negado' });
+        }
+
+        // RESTRIÇÃO: Apenas ADM vê detalhes conforme solicitado pelo usuário
+        if (!userInfo.isAdmin) {
+            return res.status(403).json({ 
+                erro: 'Acesso restrito', 
+                mensagem: 'A visualização detalhada de arquivos está disponível apenas para administradores. Você pode ver o resumo na sua aba de arquivos.' 
+            });
         }
 
         const nota = rows[0];
