@@ -261,8 +261,8 @@ app.use((req, res, next) => {
 // MIDDLEWARE DE SESSÃO
 // =============================================
 app.use(async (req, res, next) => {
-    // Pular rotas de auth e config
-    if (req.path === '/auth/google' || req.path === '/auth/callback' || req.path === '/api/config') {
+    // Pular rotas de config
+    if (req.path === '/api/config') {
         return next();
     }
 
@@ -326,93 +326,6 @@ app.use(async (req, res, next) => {
             isAdmin: false
         };
         next();
-    }
-});
-
-// =============================================
-// ROTAS DE AUTENTICAÇÃO
-// =============================================
-
-// Inicia o login com Google
-app.get('/auth/google', async (req, res) => {
-    console.log(`\n${getTimestamp()} ${'='.repeat(80)}`);
-    console.log(`${getTimestamp()} 🔑 INICIANDO LOGIN COM GOOGLE`);
-    console.log(`${getTimestamp()} Headers da requisição:`);
-    console.log(`${getTimestamp()}   - Origin: ${req.headers.origin || 'undefined'}`);
-    console.log(`${getTimestamp()}   - Referer: ${req.headers.referer || 'undefined'}`);
-    console.log(`${getTimestamp()}   - User-Agent: ${req.headers['user-agent']}`);
-
-    try {
-        const redirectTo = `${req.protocol}://${req.get('host')}/auth/callback`;
-        console.log(`${getTimestamp()} 📤 URL de redirecionamento: ${redirectTo}`);
-
-        const { data, error } = await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: redirectTo,
-                queryParams: {
-                    access_type: 'offline',
-                    prompt: 'consent'
-                }
-            }
-        });
-
-        if (error) {
-            console.error(`${getTimestamp()} ❌ Erro ao iniciar OAuth:`, error);
-            return res.redirect('/?erro=login_falhou');
-        }
-
-        if (!data?.url) {
-            console.error(`${getTimestamp()} ❌ URL de redirecionamento não gerada`);
-            return res.redirect('/?erro=login_falhou');
-        }
-
-        console.log(`${getTimestamp()} ✅ URL do Google gerada: ${data.url.substring(0, 100)}...`);
-        console.log(`${getTimestamp()} 📤 Redirecionando para o Google...`);
-        res.redirect(data.url);
-
-    } catch (error) {
-        console.error(`${getTimestamp()} ❌ Erro no auth/google:`, error.message);
-        res.redirect('/?erro=login_falhou');
-    }
-});
-
-// Callback do OAuth
-app.get('/auth/callback', async (req, res) => {
-    console.log(`\n${getTimestamp()} ${'='.repeat(80)}`);
-    console.log(`${getTimestamp()} 🔄 CALLBACK DO GOOGLE RECEBIDO`);
-    console.log(`${getTimestamp()} Query params:`, req.query);
-    console.log(`${getTimestamp()} Headers:`);
-    console.log(`${getTimestamp()}   - Origin: ${req.headers.origin || 'undefined'}`);
-    console.log(`${getTimestamp()}   - Referer: ${req.headers.referer || 'undefined'}`);
-    console.log(`${getTimestamp()}   - Cookie: ${req.headers.cookie ? 'PRESENTE' : 'AUSENTE'}`);
-
-    console.log(`${getTimestamp()} 📤 Redirecionando para página principal...`);
-    res.redirect('/');
-});
-
-// Logout
-app.post('/auth/logout', async (req, res) => {
-    console.log(`\n${getTimestamp()} ${'='.repeat(80)}`);
-    console.log(`${getTimestamp()} 🚪 LOGOUT`);
-
-    try {
-        const authHeader = req.headers.authorization;
-        console.log(`${getTimestamp()} Token no logout: ${authHeader ? 'PRESENTE' : 'AUSENTE'}`);
-
-        if (authHeader?.startsWith('Bearer ')) {
-            const token = authHeader.replace('Bearer ', '');
-            await supabase.auth.admin.signOut(token).catch(() => { });
-            console.log(`${getTimestamp()} ✅ Token invalidado no Supabase`);
-        }
-
-        res.clearCookie('anonymousSessionId');
-        console.log(`${getTimestamp()} 🍪 Cookie de sessão removido`);
-
-        res.json({ sucesso: true, mensagem: 'Logout realizado' });
-    } catch (error) {
-        console.error(`${getTimestamp()} ❌ Erro no logout:`, error.message);
-        res.json({ sucesso: true });
     }
 });
 

@@ -132,13 +132,10 @@ function getAnonymousSessionId() {
 }
 
 async function loginWithGoogle() {
-  const currentSessionId = getAnonymousSessionId();
-  if (currentSessionId) localStorage.setItem('preLoginSessionId', currentSessionId);
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin,
-      queryParams: { access_type: 'offline', prompt: 'consent' }
+      redirectTo: window.location.origin
     }
   });
   if (error) showToast('Erro ao iniciar login com Google', 'error');
