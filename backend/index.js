@@ -693,6 +693,29 @@ app.get('/api/filtros-vendedores', async (req, res) => {
 });
 
 // =============================================
+// ENDPOINT PARA AUTOCOMPLETE DE NCM
+// =============================================
+app.get('/api/ncm/autocomplete', async (req, res) => {
+    const { q } = req.query;
+    if (!q || q.length < 2) return res.json({ sucesso: true, data: [] });
+
+    try {
+        const query = `
+            SELECT codigo, descricao 
+            FROM ncm_referencia 
+            WHERE codigo ILIKE $1 OR descricao ILIKE $1
+            ORDER BY codigo ASC 
+            LIMIT 20
+        `;
+        const { rows } = await pool.query(query, [`%${q}%`]);
+        res.json({ sucesso: true, data: rows });
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro autocomplete NCM:`, error);
+        res.status(500).json({ sucesso: false, erro: 'Erro ao buscar NCM' });
+    }
+});
+
+// =============================================
 // ENDPOINT PARA BUSCA PÚBLICA DE PRODUTOS/VENDEDORES
 //
 // Parte 1: emitente → tabela emitentes (perspectiva padrão)
@@ -702,7 +725,7 @@ app.get('/api/filtros-vendedores', async (req, res) => {
 app.get('/api/buscar-produtos', async (req, res) => {
     console.log(`\n${getTimestamp()} 🔍 BUSCA DE PRODUTOS`);
     try {
-        const { termo, cidade, bairro } = req.query;
+        const { termo, cidade, bairro, ncm } = req.query;
         if (!termo || termo.length < 3)
             return res.status(400).json({ sucesso: false, erro: 'Termo deve ter pelo menos 3 caracteres' });
 
@@ -710,8 +733,15 @@ app.get('/api/buscar-produtos', async (req, res) => {
         let filtroE = '', filtroD = '';
         if (cidade) { params.push(cidade); filtroE += ` AND e.municipio ILIKE $${params.length}`; filtroD += ` AND d.municipio ILIKE $${params.length}`; }
         if (bairro) { params.push(bairro); filtroE += ` AND e.bairro    ILIKE $${params.length}`; filtroD += ` AND d.bairro    ILIKE $${params.length}`; }
+        
+        if (ncm) {
+            const ncmLimpo = ncm.replace(/\D/g, '');
+            params.push(`${ncmLimpo}%`);
+            filtroE += ` AND p.ncm ILIKE $${params.length}`;
+            filtroD += ` AND p.ncm ILIKE $${params.length}`;
+        }
 
-        const { rows } = await pool.query(`
+        const queryStr = `
             SELECT p.codigo_barras AS cean, p.descricao AS descricao_produto, p.ncm,
                    e.cnpj AS vendedor_cnpj, e.razao_social AS vendedor_razao_social,
                    e.nome_fantasia AS vendedor_nome_fantasia,
@@ -746,7 +776,9 @@ app.get('/api/buscar-produtos', async (req, res) => {
               AND (p.codigo_barras ILIKE $1 OR p.descricao ILIKE $1) ${filtroD}
 
             ORDER BY data_emissao DESC LIMIT 300
-        `, params);
+        `;
+
+        const { rows } = await pool.query(queryStr, params);
 
         const map = new Map();
         rows.forEach(row => {

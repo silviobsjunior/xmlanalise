@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   setupEventListeners();
   await carregarFiltros();
+  setupNcmAutocomplete();
   await carregarEstatisticasGerais();
 
   // Aba busca é a padrão — não carrega notas/stats até o usuário trocar de aba
@@ -250,6 +251,7 @@ async function executarBusca() {
   const termo = document.getElementById('buscaTermo')?.value?.trim();
   const cidade = document.getElementById('filtroCidade')?.value;
   const bairro = document.getElementById('filtroBairro')?.value;
+  const ncm = document.getElementById('filtroNcm')?.value?.trim();
 
   const loading = document.getElementById('buscaLoading');
   const vazio = document.getElementById('buscaVazio');
@@ -269,6 +271,7 @@ async function executarBusca() {
     const params = new URLSearchParams({ termo });
     if (cidade) params.append('cidade', cidade);
     if (bairro) params.append('bairro', bairro);
+    if (ncm) params.append('ncm', ncm);
 
     const res = await fetch(`${API}/api/buscar-produtos?${params}`);
     const data = await res.json();
@@ -408,6 +411,63 @@ function renderizarResultados(resultados, termo) {
     `;
 
     container.appendChild(card);
+  });
+}
+
+// ============================================================
+// AUTOCOMPLETE NCM
+// ============================================================
+function setupNcmAutocomplete() {
+  const inputNcm = document.getElementById('filtroNcm');
+  const sugestoesCont = document.getElementById('ncmSugestoes');
+  
+  if (!inputNcm || !sugestoesCont) return;
+
+  let timeout = null;
+
+  inputNcm.addEventListener('input', () => {
+    clearTimeout(timeout);
+    const q = inputNcm.value.trim();
+
+    if (q.length < 2) {
+      sugestoesCont.style.display = 'none';
+      return;
+    }
+
+    timeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API}/api/ncm/autocomplete?q=${encodeURIComponent(q)}`);
+        const result = await res.json();
+
+        if (result.sucesso && result.data.length > 0) {
+          sugestoesCont.innerHTML = result.data.map(item => `
+            <div class="ncm-sugestao-item" data-codigo="${item.codigo}">
+              <strong>${item.codigo}</strong> ${item.descricao}
+            </div>
+          `).join('');
+          sugestoesCont.style.display = 'block';
+
+          // Click na sugestão
+          sugestoesCont.querySelectorAll('.ncm-sugestao-item').forEach(el => {
+            el.addEventListener('click', () => {
+              inputNcm.value = el.dataset.codigo;
+              sugestoesCont.style.display = 'none';
+            });
+          });
+        } else {
+          sugestoesCont.style.display = 'none';
+        }
+      } catch (e) {
+        console.error('Erro NCM autocomplete:', e);
+      }
+    }, 300);
+  });
+
+  // Fechar ao clicar fora
+  document.addEventListener('click', (e) => {
+    if (e.target !== inputNcm && e.target !== sugestoesCont) {
+      sugestoesCont.style.display = 'none';
+    }
   });
 }
 
@@ -979,9 +1039,11 @@ function setupEventListeners() {
       const buscaTermoEl = document.getElementById('buscaTermo');
       const filtroCidadeEl = document.getElementById('filtroCidade');
       const filtroBairro = document.getElementById('filtroBairro');
+      const filtroNcm = document.getElementById('filtroNcm');
       if (buscaTermoEl) buscaTermoEl.value = '';
       if (filtroCidadeEl) { filtroCidadeEl.value = ''; popularBairros(''); }
       if (filtroBairro) filtroBairro.value = '';
+      if (filtroNcm) filtroNcm.value = '';
       const resultados = document.getElementById('buscaResultados');
       const vazio = document.getElementById('buscaVazio');
       const vazioMsg = document.getElementById('buscaVazioMsg');

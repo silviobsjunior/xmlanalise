@@ -79,7 +79,7 @@ Você pode criar um arquivo `index.html` na raiz do seu domínio com o seguinte 
             </a>
             <a href="/maspiofmg" class="card">
                 <h2>IOFMG</h2>
-                <p>Gestão e Monitoramento Maspiogmg.</p>
+                <p>Gestão e Monitoramento MASP no IOF MG.</p>
             </a>
         </div>
     </div>
