@@ -1485,6 +1485,63 @@ app.post('/api/migrar-dados-anonimos', async (req, res) => {
 });
 
 // =============================================
+// ENDPOINT PARA EXCLUIR VÍNCULO COM NOTA FISCAL
+// =============================================
+app.delete('/api/nota/:id', async (req, res) => {
+    const { id } = req.params;
+    const userInfo = req.userInfo;
+
+    console.log(`\n${getTimestamp()} 🗑️ SOLICITAÇÃO DE EXCLUSÃO DE NOTA`);
+    console.log(`${getTimestamp()} ID Nota: ${id}`);
+    console.log(`${getTimestamp()} Usuário:`, userInfo);
+
+    if (userInfo.type !== 'user' && userInfo.type !== 'anonymous') {
+        return res.status(401).json({
+            sucesso: false,
+            erro: 'É necessário estar logado ou em sessão anônima para excluir'
+        });
+    }
+
+    try {
+        // Verificar se a nota pertence ao usuário antes de excluir
+        const checkQuery = userInfo.type === 'user' 
+            ? 'SELECT id FROM notas_fiscais WHERE id = $1 AND usuario_id = $2'
+            : 'SELECT id FROM notas_fiscais WHERE id = $1 AND sessao_anonima_id = $2';
+        
+        const checkResult = await pool.query(checkQuery, [id, userInfo.id]);
+
+        if (checkResult.rows.length === 0) {
+            console.log(`${getTimestamp()} ⚠️ Tentativa de excluir nota inexistente ou sem permissão`);
+            return res.status(404).json({
+                sucesso: false,
+                erro: 'Nota fiscal não encontrada ou sem permissão para excluir'
+            });
+        }
+
+        // EXCLUSÃO LÓGICA: No contexto deste app, "excluir" significa remover o vínculo do usuário 
+        // com aquela nota específica. A informação da nota em si (atores, nfe_importadas, produtos_nfe) 
+        // permanece no banco para outros usuários e para consultas globais de preços.
+        
+        const deleteQuery = 'DELETE FROM notas_fiscais WHERE id = $1';
+        await pool.query(deleteQuery, [id]);
+
+        console.log(`${getTimestamp()} ✅ Vínculo com nota ${id} removido com sucesso`);
+
+        res.json({
+            sucesso: true,
+            mensagem: 'Nota fiscal removida da sua lista'
+        });
+
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro ao excluir nota:`, error);
+        res.status(500).json({
+            sucesso: false,
+            erro: 'Erro interno ao processar exclusão'
+        });
+    }
+});
+
+// =============================================
 // ENDPOINT DE SAÚDE DA API
 // =============================================
 app.get('/api/health', async (req, res) => {

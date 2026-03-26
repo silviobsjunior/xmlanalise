@@ -651,7 +651,7 @@ async function loadNotas(search = '', pagina = 1, porPagina = null) {
           </div>
         </div>
         <div class="file-actions">
-          <button class="btn btn-secondary" onclick="viewNota('${nota.id}')">Ver</button>
+          <button class="btn btn-secondary" onclick="viewNota('${nota.id}')">Ver agora</button>
           <button class="btn btn-danger" onclick="deleteNota('${nota.id}')">Excluir</button>
         </div>`;
       fileList.appendChild(li);
@@ -663,6 +663,37 @@ async function loadNotas(search = '', pagina = 1, porPagina = null) {
     console.error('Erro ao carregar notas:', e);
     if (loadingIndicator) loadingIndicator.style.display = 'none';
     if (emptyState) emptyState.style.display = 'flex';
+  }
+}
+
+async function carregarEstatisticasGerais() {
+  const container = document.getElementById('globalStats');
+  if (!container) return;
+
+  try {
+    const response = await fetch(`${API}/api/estatisticas-gerais`);
+    const data = await response.json();
+
+    if (data.sucesso) {
+      container.innerHTML = `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+          <div class="stat-card" style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-left: 4px solid #667eea;">
+            <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;">📦 Produtos Mapeados</div>
+            <div style="font-size: 20px; font-weight: 700; color: #333;">${data.total_produtos.toLocaleString('pt-BR')}</div>
+          </div>
+          <div class="stat-card" style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-left: 4px solid #764ba2;">
+            <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;">🏢 Fornecedores</div>
+            <div style="font-size: 20px; font-weight: 700; color: #333;">${data.total_fornecedores.toLocaleString('pt-BR')}</div>
+          </div>
+          <div class="stat-card" style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-left: 4px solid #4caf50;">
+            <div style="font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px;">🏙️ Cidades Atendidas</div>
+            <div style="font-size: 20px; font-weight: 700; color: #333;">${data.total_cidades.toLocaleString('pt-BR')}</div>
+          </div>
+        </div>
+      `;
+    }
+  } catch (e) {
+    console.error('Erro ao carregar estatísticas gerais:', e);
   }
 }
 
