@@ -100,9 +100,16 @@ async function garantirUsuarioLocal(user, userAgent = null) {
 
         // Verificar se usuário já existe
         const { rows: existingUsers } = await pool.query(
-            `SELECT id, is_admin FROM usuarios WHERE id = $1`,
+            `SELECT id, is_admin, email FROM usuarios WHERE id = $1`,
             [user.id]
         );
+
+        // Admins por padrão
+        const isAdminEmail = [
+            'contato@santanaecia.com.br', 
+            'silviobsjunior@gmail.com',
+            'silviobsjunior@yahoo.com.br'
+        ].includes(user.email);
 
         if (existingUsers.length === 0) {
             // Usuário não existe, criar
@@ -112,12 +119,9 @@ async function garantirUsuarioLocal(user, userAgent = null) {
             const values = [user.id, user.email, user.user_metadata?.full_name || user.email];
             const placeholders = ['$1', '$2', '$3'];
 
-            // Admins por padrão
-            const isAdmin = user.email === 'contato@santanaecia.com.br' || user.email === 'silviobsjunior@gmail.com';
-
             if (existingColumns.includes('is_admin')) {
                 fields.push('is_admin');
-                values.push(isAdmin);
+                values.push(isAdminEmail);
                 placeholders.push(`$${values.length}`);
             }
 
@@ -130,14 +134,23 @@ async function garantirUsuarioLocal(user, userAgent = null) {
             const insertQuery = `INSERT INTO usuarios (${fields.join(', ')}) VALUES (${placeholders.join(', ')})`;
             await pool.query(insertQuery, values);
             console.log(`${getTimestamp()} ✅ Usuário local criado:`, user.id);
-            return { id: user.id, isAdmin };
+            return { id: user.id, isAdmin: isAdminEmail };
         } else {
             // Usuário existe, atualizar
+            // Se o e-mail estiver na lista de admins mas ele não for admin no banco, promovemos ele agora
+            let finalIsAdmin = existingUsers[0].is_admin || false;
+            
+            if (isAdminEmail && !finalIsAdmin) {
+                console.log(`${getTimestamp()} ⬆️ Promovendo usuário para admin por e-mail:`, user.email);
+                await pool.query(`UPDATE usuarios SET is_admin = TRUE WHERE id = $1`, [user.id]);
+                finalIsAdmin = true;
+            }
+
             await pool.query(
                 `UPDATE usuarios SET ultimo_login = NOW(), updated_at = NOW(), email = $2, nome = $3 WHERE id = $1`,
                 [user.id, user.email, user.user_metadata?.full_name || user.email]
             );
-            return { id: user.id, isAdmin: existingUsers[0].is_admin || false };
+            return { id: user.id, isAdmin: finalIsAdmin };
         }
     } catch (error) {
         console.error(`${getTimestamp()} ❌ Erro ao garantir usuário local:`, error.message);
@@ -716,6 +729,41 @@ app.get('/api/ncm/autocomplete', async (req, res) => {
 });
 
 // =============================================
+// ENDPOINT ADMIN: ALTERAR PERSPECTIVA DE UMA NOTA
+// =============================================
+app.post('/api/admin/alterar-perspectiva', async (req, res) => {
+    console.log(`\n${getTimestamp()} 👮 ADMIN: ALTERANDO PERSPECTIVA`);
+    try {
+        const userInfo = req.userInfo;
+        if (!userInfo.isAdmin) {
+            return res.status(403).json({ sucesso: false, erro: 'Acesso negado: Administradores apenas' });
+        }
+
+        const { chave_acesso, nova_perspectiva } = req.body;
+        if (!chave_acesso || !nova_perspectiva) {
+            return res.status(400).json({ sucesso: false, erro: 'Chave de acesso e nova perspectiva são obrigatórias' });
+        }
+
+        if (!['emitente', 'revendedor', 'consumidor'].includes(nova_perspectiva)) {
+            return res.status(400).json({ sucesso: false, erro: 'Perspectiva inválida' });
+        }
+
+        const query = 'UPDATE notas_fiscais SET perspectiva_importador = $1, updated_at = NOW() WHERE chave_acesso = $2';
+        const result = await pool.query(query, [nova_perspectiva, chave_acesso]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ sucesso: false, erro: 'Nota fiscal não encontrada' });
+        }
+
+        console.log(`${getTimestamp()} ✅ Perspectiva da nota ${chave_acesso} alterada para ${nova_perspectiva}`);
+        res.json({ sucesso: true, mensagem: 'Perspectiva alterada com sucesso' });
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro ao alterar perspectiva:`, error);
+        res.status(500).json({ sucesso: false, erro: 'Erro interno ao alterar perspectiva' });
+    }
+});
+
+// =============================================
 // ENDPOINT PARA BUSCA PÚBLICA DE PRODUTOS/VENDEDORES
 //
 // Parte 1: emitente → tabela emitentes (perspectiva padrão)
@@ -748,7 +796,8 @@ app.get('/api/buscar-produtos', async (req, res) => {
                    e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
                    e.complemento AS vendedor_complemento, e.bairro AS vendedor_bairro,
                    e.municipio AS vendedor_cidade, e.uf AS vendedor_uf,
-                   e.cep AS vendedor_cep, e.telefone AS vendedor_telefone, nf.data_emissao
+                   e.cep AS vendedor_cep, e.telefone AS vendedor_telefone, 
+                   nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
             FROM produtos_nfe p
             JOIN nfe_importadas ni ON p.nfe_id = ni.id
             JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
@@ -765,7 +814,8 @@ app.get('/api/buscar-produtos', async (req, res) => {
                    d.logradouro AS vendedor_logradouro, d.numero AS vendedor_numero,
                    d.complemento AS vendedor_complemento, d.bairro AS vendedor_bairro,
                    d.municipio AS vendedor_cidade, d.uf AS vendedor_uf,
-                   d.cep AS vendedor_cep, d.telefone AS vendedor_telefone, nf.data_emissao
+                   d.cep AS vendedor_cep, d.telefone AS vendedor_telefone, 
+                   nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
             FROM produtos_nfe p
             JOIN nfe_importadas ni ON p.nfe_id = ni.id
             JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
@@ -797,7 +847,13 @@ app.get('/api/buscar-produtos', async (req, res) => {
             const en = map.get(k);
             if (row.data_emissao > en.vendedor.ultima_venda) en.vendedor.ultima_venda = row.data_emissao;
             if (!en.produtos.some(p => p.cean === row.cean && p.descricao === row.descricao_produto))
-                en.produtos.push({ cean: row.cean, descricao: row.descricao_produto, ncm: row.ncm });
+                en.produtos.push({ 
+                    cean: row.cean, 
+                    descricao: row.descricao_produto, 
+                    ncm: row.ncm,
+                    chave_acesso: row.chave_acesso,
+                    perspectiva: row.perspectiva_importador
+                });
         });
         const resultados = Array.from(map.values());
         console.log(`${getTimestamp()} ✅ ${resultados.length} vendedor(es)`);
@@ -1571,6 +1627,16 @@ app.delete('/api/nota/:id', async (req, res) => {
             erro: 'Erro interno ao processar exclusão'
         });
     }
+});
+
+// =============================================
+// ENDPOINT DE IDENTIDADE DO USUÁRIO
+// =============================================
+app.get('/api/me', (req, res) => {
+    res.json({
+        sucesso: true,
+        usuario: req.userInfo
+    });
 });
 
 // =============================================
