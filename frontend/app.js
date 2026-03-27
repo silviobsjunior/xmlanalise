@@ -356,14 +356,28 @@ function setupEventListeners() {
 async function carregarEstatisticasGerais() {
   const container = document.getElementById('globalStats');
   if (!container) return;
-  const res = await fetch(`${API}/api/estatisticas-gerais`);
-  const data = await res.json();
-  if (data.sucesso) {
-    container.innerHTML = `<div class="stats-grid-modern">
-      <div class="stat-card-modern"><div class="stat-value">${data.total_produtos}</div><div class="stat-label">Produtos</div></div>
-      <div class="stat-card-modern"><div class="stat-value">${data.total_fornecedores}</div><div class="stat-label">Vendedores</div></div>
-      <div class="stat-card-modern"><div class="stat-value">${data.total_cidades}</div><div class="stat-label">Cidades</div></div>
-    </div>`;
+  try {
+    const res = await fetch(`${API}/api/estatisticas-gerais`);
+    const data = await res.json();
+    if (data.sucesso) {
+      container.innerHTML = `
+        <div class="stats-grid-modern" style="margin-bottom: 24px;">
+          <div class="stat-card-modern">
+            <div class="stat-value">${data.total_produtos.toLocaleString('pt-BR')}</div>
+            <div class="stat-label">📦 Produtos Mapeados</div>
+          </div>
+          <div class="stat-card-modern">
+            <div class="stat-value">${data.total_fornecedores.toLocaleString('pt-BR')}</div>
+            <div class="stat-label">🏢 Vendedores</div>
+          </div>
+          <div class="stat-card-modern">
+            <div class="stat-value">${data.total_cidades.toLocaleString('pt-BR')}</div>
+            <div class="stat-label">🏙️ Cidades Atendidas</div>
+          </div>
+        </div>`;
+    }
+  } catch (e) {
+    console.error('Erro estatísticas home:', e);
   }
 }
 
