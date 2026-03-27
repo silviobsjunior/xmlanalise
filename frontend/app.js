@@ -238,7 +238,7 @@ function showAnonymousUser() {
 }
 
 // ============================================================
-// ABA DE BUSCA DE VENDEDORES
+// ABA DE BUSCA DE VENDEDORES & FILTROS
 // ============================================================
 async function carregarFiltros() {
   try {
@@ -250,6 +250,8 @@ async function carregarFiltros() {
 
     const selectCidade = document.getElementById('filtroCidade');
     if (selectCidade) {
+      // Limpa e mantém a opção padrão
+      selectCidade.innerHTML = '<option value="">📍 Todas as cidades</option>';
       data.cidades.forEach(c => {
         const opt = document.createElement('option');
         opt.value = c.municipio;
@@ -260,6 +262,9 @@ async function carregarFiltros() {
 
     // Popula todos os bairros inicialmente
     popularBairros('');
+    
+    // Tenta detectar localização do usuário
+    detectarLocalizacaoUsuario();
 
   } catch (e) {
     console.error('Erro ao carregar filtros:', e);
@@ -270,18 +275,46 @@ function popularBairros(cidadeFiltro) {
   const selectBairro = document.getElementById('filtroBairro');
   if (!selectBairro) return;
 
-  selectBairro.innerHTML = '<option value="">📍 Todos os bairros</option>';
+  selectBairro.innerHTML = '<option value="">🏘️ Todos os bairros</option>';
 
   const bairrosFiltrados = cidadeFiltro
     ? todosOsBairros.filter(b => b.municipio === cidadeFiltro)
     : todosOsBairros;
 
-  bairrosFiltrados.forEach(b => {
+  // Remove duplicados de bairros (caso venham do banco)
+  const bairrosUnicos = [...new Set(bairrosFiltrados.map(b => b.bairro))].sort();
+
+  bairrosUnicos.forEach(bairro => {
     const opt = document.createElement('option');
-    opt.value = b.bairro;
-    opt.textContent = b.bairro;
+    opt.value = bairro;
+    opt.textContent = bairro;
     selectBairro.appendChild(opt);
   });
+}
+
+async function detectarLocalizacaoUsuario() {
+  try {
+    // 1. Tenta por IP (mais rápido e não pede permissão)
+    const res = await fetch('https://ipapi.co/json/');
+    const data = await res.json();
+    
+    if (data.city) {
+      const selectCidade = document.getElementById('filtroCidade');
+      const cidadeFormatada = data.city.toUpperCase();
+      
+      // Verifica se a cidade existe no nosso select
+      for (let i = 0; i < selectCidade.options.length; i++) {
+        if (selectCidade.options[i].value.toUpperCase() === cidadeFormatada) {
+          selectCidade.selectedIndex = i;
+          popularBairros(selectCidade.value);
+          console.log(`📍 Localização detectada via IP: ${data.city}`);
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Não foi possível detectar localização via IP');
+  }
 }
 
 async function executarBusca() {
