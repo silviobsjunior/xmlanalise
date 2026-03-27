@@ -774,6 +774,46 @@ async function deleteNota(id) {
   } catch (e) {}
 }
 
+// ============================================================
+// UI HELPERS & NAVIGATION
+// ============================================================
+window.toggleSidebar = () => {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.toggle('open');
+};
+
+window.switchTab = (tabName) => {
+  const sidebar = document.getElementById('sidebar');
+  
+  // Atualiza classes dos itens do menu (desktop e mobile)
+  document.querySelectorAll('.nav-item').forEach(item => {
+    if (item.dataset.tab === tabName) {
+      item.classList.add('active');
+    } else {
+      item.classList.remove('active');
+    }
+  });
+
+  // Mostrar/esconder tabs
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.style.display = 'none';
+  });
+
+  const activeTab = document.getElementById(tabName + 'Tab');
+  if (activeTab) {
+    activeTab.style.display = 'block';
+  }
+
+  // Se estiver no mobile, fecha a sidebar após clicar
+  if (window.innerWidth <= 768 && sidebar) {
+    sidebar.classList.remove('open');
+  }
+
+  // Ações específicas ao trocar de aba
+  if (tabName === 'arquivos') loadNotas();
+  if (tabName === 'estatisticas') loadStatistics();
+};
+
 function setupEventListeners() {
   const loginBtns = [document.getElementById('desktopLoginBtn'), document.getElementById('sidebarLoginBtn'), document.getElementById('bannerLoginBtn')];
   const logoutBtns = [document.getElementById('desktopLogoutBtn'), document.getElementById('sidebarLogoutBtn')];
@@ -785,17 +825,23 @@ function setupEventListeners() {
   document.getElementById('buscaTermo')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') executarBusca(); });
   document.getElementById('filtroCidade')?.addEventListener('change', (e) => popularBairros(e.target.value));
   document.getElementById('limparFiltrosBtn')?.addEventListener('click', () => {
-    document.getElementById('buscaTermo').value = '';
-    document.getElementById('filtroCidade').value = '';
-    document.getElementById('filtroBairro').value = '';
-    document.getElementById('filtroNcm').value = '';
+    const termo = document.getElementById('buscaTermo');
+    const cidade = document.getElementById('filtroCidade');
+    const bairro = document.getElementById('filtroBairro');
+    const ncm = document.getElementById('filtroNcm');
+    if (termo) termo.value = '';
+    if (cidade) { cidade.value = ''; popularBairros(''); }
+    if (bairro) bairro.value = '';
+    if (ncm) ncm.value = '';
     executarBusca();
   });
 
   const uploadArea = document.getElementById('uploadArea');
   const fileInput = document.getElementById('fileInput');
   if (uploadArea) {
-    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('click', (e) => {
+      if (e.target !== fileInput) fileInput.click();
+    });
     uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
     uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
     uploadArea.addEventListener('drop', handleDrop);
@@ -805,31 +851,21 @@ function setupEventListeners() {
   document.getElementById('selectFilesBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = false; fileInput.multiple = true; fileInput.click(); });
   document.getElementById('selectFolderBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = true; fileInput.click(); });
 
+  // Hamburguer menu para mobile
   const menuToggle = document.getElementById('menuToggle');
-  const sidebar = document.getElementById('sidebar');
-  if (menuToggle && sidebar) {
-    menuToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+  if (menuToggle) {
+    menuToggle.addEventListener('click', window.toggleSidebar);
   }
 
   // Fechar sidebar ao clicar fora no mobile
   document.addEventListener('click', (e) => {
+    const sidebar = document.getElementById('sidebar');
+    const menuToggle = document.getElementById('menuToggle');
     if (window.innerWidth <= 768 && sidebar && menuToggle) {
-      if (!sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
+      if (!sidebar.contains(e.target) && !menuToggle.contains(e.target) && sidebar.classList.contains('open')) {
         sidebar.classList.remove('open');
       }
     }
-  });
-
-  document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const tab = item.dataset.tab;
-      document.querySelectorAll('.nav-item').forEach(i => i.classList.toggle('active', i.dataset.tab === tab));
-      document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-      document.getElementById(tab + 'Tab').style.display = 'block';
-      if (tab === 'arquivos') loadNotas();
-      if (tab === 'estatisticas') loadStatistics();
-      if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
-    });
   });
 
   document.getElementById('searchInput')?.addEventListener('input', debounce((e) => loadNotas(e.target.value, 1), 300));
