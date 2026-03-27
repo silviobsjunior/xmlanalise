@@ -12,6 +12,7 @@ let userIsAdmin = false;
 // Dados dos filtros e busca
 let todosOsBairros = [];
 let baseFiltrosGlobal = { cidades: [], bairros: [] };
+let filtrosEncontradosNaBusca = { cidades: [], bairros: [] }; // Persiste os locais encontrados no termo atual
 let resultadosBuscaAtuais = [];
 let paginacaoState = { pagina: 1, porPagina: 50, total: 0, totalPaginas: 0, search: '' };
 
@@ -253,19 +254,35 @@ async function executarBusca() {
     resultadosBuscaAtuais = data.resultados;
     renderizarResultados(data.resultados, termo);
 
-    // Atualiza filtros com base nos resultados encontrados
-    const novosFiltros = { cidades: [], bairros: [] };
-    data.resultados.forEach(r => {
-      const v = r.vendedor;
-      if (v.cidade) novosFiltros.cidades.push({ municipio: v.cidade, uf: v.uf });
-      if (v.bairro) novosFiltros.bairros.push({ municipio: v.cidade, bairro: v.bairro });
-    });
-    repopularSelects(novosFiltros.cidades, novosFiltros.bairros, true);
+    // PERSISTÊNCIA: Extrai e guarda os filtros se for uma nova busca por termo
+    // Se o usuário está apenas refinando (já tem termo), mantemos a lista expandida encontrada no início
+    const extraidos = extrairFiltrosDeResultados(data.resultados);
+    
+    // Se não houver filtros salvos para este termo, ou se for busca global sem filtros prévios, salvamos
+    if (!cidade && !bairro) {
+      filtrosEncontradosNaBusca = extraidos;
+    } else if (filtrosEncontradosNaBusca.cidades.length === 0) {
+      filtrosEncontradosNaBusca = extraidos;
+    }
+
+    // Repopula usando a lista "expandida" de locais onde o produto existe
+    repopularSelects(filtrosEncontradosNaBusca.cidades, filtrosEncontradosNaBusca.bairros, true);
 
   } catch (e) {
     if (loading) loading.style.display = 'none';
     showToast('Erro na busca', 'error');
   }
+}
+
+function extrairFiltrosDeResultados(resultados) {
+  const cidades = [];
+  const bairros = [];
+  resultados.forEach(r => {
+    const v = r.vendedor;
+    if (v.cidade) cidades.push({ municipio: v.cidade, uf: v.uf });
+    if (v.bairro) bairros.push({ municipio: v.cidade, bairro: v.bairro });
+  });
+  return { cidades, bairros };
 }
 
 function renderizarResultados(resultados, termo) {
@@ -276,10 +293,12 @@ function renderizarResultados(resultados, termo) {
   resultados.forEach(item => {
     const v = item.vendedor;
     const endereco = [v.logradouro, v.numero, v.bairro, v.cidade].filter(Boolean).join(', ');
+    const cnpjFmt = formatarCNPJ(v.cnpj);
+    const telHtml = v.telefone ? `<a href="tel:${v.telefone}" style="color:#667eea; text-decoration:none;">📞 ${v.telefone}</a>` : '<span style="color:#ccc;">Sem telefone</span>';
     
     const produtosHtml = item.produtos.slice(0, 5).map(p => `
       <span style="display:inline-block; background:#e8f0fe; color:#3c5fb5; border-radius:20px; padding:3px 10px; font-size:12px; margin:2px;">
-        ${p.descricao} ${p.ncm ? `<b onclick="setNcmFilter('${p.ncm}')" style="cursor:pointer;text-decoration:underline;margin-left:4px;">#${p.ncm}</b>` : ''}
+        ${p.descricao} ${p.ncm ? `<b onclick="setNcmFilter('${p.ncm}')" style="cursor:pointer;text-decoration:underline;color:#667eea;margin-left:4px;">#${p.ncm}</b>` : ''}
       </span>
     `).join('');
 
@@ -287,11 +306,18 @@ function renderizarResultados(resultados, termo) {
     card.className = 'card-modern';
     card.style.marginBottom = '12px';
     card.innerHTML = `
-      <div style="font-weight:600; font-size:16px;">${v.nome_fantasia || v.razao_social}</div>
-      <div style="font-size:13px; color:#666; margin:4px 0 10px;">📍 ${endereco}</div>
-      <div>${produtosHtml}</div>
-      <div style="margin-top:10px; text-align:right;">
-        <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}" target="_blank" class="btn btn-outline" style="padding:4px 8px; font-size:12px;">Ver no Maps</a>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+        <div style="font-weight:600; font-size:17px; color:#1a1f36;">${v.nome_fantasia || v.razao_social}</div>
+        <div style="font-size:11px; color:#888; background:#f0f2f5; padding:2px 8px; border-radius:4px;">CNPJ: ${cnpjFmt}</div>
+      </div>
+      <div style="font-size:13px; color:#666; margin-bottom:12px;">📍 ${endereco}</div>
+      <div style="margin-bottom:15px;">${produtosHtml}</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #f0f0f0; padding-top:10px;">
+        <div style="font-size:13px;">${telHtml}</div>
+        <div style="display:flex; gap:8px;">
+          <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}" target="_blank" class="btn btn-outline" style="padding:5px 10px; font-size:12px;">📍 Maps</a>
+          <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}&layer=c" target="_blank" class="btn btn-outline" style="padding:5px 10px; font-size:12px; color:#43a047; border-color:#43a047;">🚶 Street View</a>
+        </div>
       </div>
     `;
     container.appendChild(card);
@@ -323,6 +349,13 @@ window.setNcmFilter = (ncm) => {
   }
 };
 
+function formatarCNPJ(cnpj) {
+  if (!cnpj) return '—';
+  const s = cnpj.replace(/\D/g, '');
+  if (s.length !== 14) return cnpj;
+  return s.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+}
+
 function setupEventListeners() {
   document.getElementById('desktopLoginBtn')?.addEventListener('click', loginWithGoogle);
   document.getElementById('sidebarLoginBtn')?.addEventListener('click', loginWithGoogle);
@@ -332,13 +365,22 @@ function setupEventListeners() {
   
   document.getElementById('buscaBtn')?.addEventListener('click', executarBusca);
   document.getElementById('buscaTermo')?.addEventListener('keydown', (e) => { if(e.key === 'Enter') executarBusca(); });
-  document.getElementById('filtroCidade')?.addEventListener('change', (e) => popularBairrosComDados(resultadosBuscaAtuais.length > 0 ? extrairFiltrosDeResultados(resultadosBuscaAtuais).bairros : baseFiltrosGlobal.bairros, e.target.value));
+  
+  document.getElementById('filtroCidade')?.addEventListener('change', (e) => {
+    const fonte = filtrosEncontradosNaBusca.bairros.length > 0 ? filtrosEncontradosNaBusca.bairros : baseFiltrosGlobal.bairros;
+    popularBairrosComDados(fonte, e.target.value);
+  });
 
   document.getElementById('limparFiltrosBtn')?.addEventListener('click', () => {
     document.getElementById('buscaTermo').value = '';
     document.getElementById('filtroNcm').value = '';
     resultadosBuscaAtuais = [];
+    filtrosEncontradosNaBusca = { cidades: [], bairros: [] }; // Reseta persistência de busca
     repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros, false);
+    const resultadosDiv = document.getElementById('buscaResultados');
+    if (resultadosDiv) resultadosDiv.innerHTML = '';
+    const vazio = document.getElementById('buscaVazio');
+    if (vazio) vazio.style.display = 'block';
   });
 
   const uploadArea = document.getElementById('uploadArea');
