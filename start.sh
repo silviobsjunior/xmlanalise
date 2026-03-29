@@ -69,22 +69,19 @@ check_deps() {
 start_node() {
     echo -e "${GREEN}▶  Iniciando servidor Node.js (porta 3000)...${NC}"
     cd "$BACKEND_DIR"
-    node index.js > ../server.log 2>&1 &
+    node index.js &
     NODE_PID=$!
     echo $NODE_PID >> "$PID_FILE"
     echo -e "${GREEN}   ✅ Node.js rodando (PID: $NODE_PID)${NC}"
-    echo -e "${GREEN}   🌐 http://localhost:3000${NC}"
 }
 
 start_python() {
     echo -e "${GREEN}▶  Iniciando FastAPI Python (porta 8000)...${NC}"
     cd "$BACKEND_DIR"
-    "$VENV_DIR/bin/python3" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload > ../fastapi.log 2>&1 &
+    "$VENV_DIR/bin/python3" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload &
     PYTHON_PID=$!
     echo $PYTHON_PID >> "$PID_FILE"
     echo -e "${GREEN}   ✅ FastAPI rodando (PID: $PYTHON_PID)${NC}"
-    echo -e "${GREEN}   🌐 http://localhost:8000${NC}"
-    echo -e "${GREEN}   📖 Docs: http://localhost:8000/docs${NC}"
 }
 
 stop_all() {
