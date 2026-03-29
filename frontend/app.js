@@ -55,12 +55,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   setupNcmAutocomplete();
 
-  // 2. Carrega filtros base IMEDIATAMENTE (não espera o auth pendente)
-  carregarFiltros().then(() => {
-    console.log('✅ Filtros base carregados');
-  }).catch(e => console.error('❌ Erro carregando filtros iniciais:', e));
+  // 2. Carrega dados essenciais com retry (Render pode estar dormindo)
+  await carregarFiltrosComRetry();
+  await carregarEstatisticasComRetry();
 
-  // 3. Inicializa Supabase e Auth em paralelo
+  // 3. Inicializa Supabase e Auth
   try {
     const supabaseReady = await initSupabase();
     if (!supabaseReady) {
@@ -73,9 +72,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Erro na inicialização do Auth:', e);
     showAnonymousUser();
   }
-
-  await carregarEstatisticasGerais();
 });
+
+// Retry wrapper genérico para APIs que podem falhar com 503 (Render cold start)
+async function fetchComRetry(url, tentativas = 3, intervaloMs = 3000) {
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
+      if (res.status === 503 && i < tentativas - 1) {
+        console.warn(`⏳ Servidor dormindo (503), tentativa ${i + 2}/${tentativas} em ${intervaloMs / 1000}s...`);
+        await new Promise(r => setTimeout(r, intervaloMs));
+        continue;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      if (i < tentativas - 1) {
+        console.warn(`⏳ Falha na requisição (${e.message}), tentativa ${i + 2}/${tentativas}...`);
+        await new Promise(r => setTimeout(r, intervaloMs));
+      } else {
+        throw e;
+      }
+    }
+  }
+}
+
+async function carregarFiltrosComRetry() {
+  try {
+    await carregarFiltros();
+  } catch (e) {
+    console.error('❌ Erro final carregando filtros:', e);
+  }
+}
+
+async function carregarEstatisticasComRetry() {
+  try {
+    await carregarEstatisticasGerais();
+  } catch (e) {
+    console.error('❌ Erro final carregando estatísticas:', e);
+  }
+}
 
 // ============================================================
 // AUTENTICAÇÃO E PERMISSÕES
@@ -260,26 +296,21 @@ function showAnonymousUser() {
 // ============================================================
 async function carregarFiltros() {
   console.log('📡 Buscando filtros base do servidor...');
-  try {
-    const res = await fetch(`${API}/api/filtros-vendedores`);
-    const data = await res.json();
-    console.log('📦 Dados de filtros recebidos:', data);
-    
-    if (!data.sucesso) {
-      console.warn('Backend retornou erro nos filtros:', data.erro);
-      return;
-    }
-
-    baseFiltrosGlobal.cidades = data.cidades || [];
-    baseFiltrosGlobal.bairros = data.bairros || [];
-    
-    console.log(`✅ Base global: ${baseFiltrosGlobal.cidades.length} cidades, ${baseFiltrosGlobal.bairros.length} bairros`);
-    
-    repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros, false);
-    detectarLocalizacaoUsuario();
-  } catch (e) {
-    console.error('❌ Erro fatal ao carregar filtros iniciais:', e);
+  const data = await fetchComRetry(`${API}/api/filtros-vendedores`);
+  console.log('📦 Dados de filtros recebidos:', data);
+  
+  if (!data || !data.sucesso) {
+    console.warn('Backend retornou erro nos filtros:', data?.erro);
+    return;
   }
+
+  baseFiltrosGlobal.cidades = data.cidades || [];
+  baseFiltrosGlobal.bairros = data.bairros || [];
+  
+  console.log(`✅ Base global: ${baseFiltrosGlobal.cidades.length} cidades, ${baseFiltrosGlobal.bairros.length} bairros`);
+  
+  repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros, false);
+  detectarLocalizacaoUsuario();
 }
 
 function repopularSelects(cidades, bairros, manterSelecao = true) {
@@ -828,33 +859,28 @@ async function carregarEstatisticasGerais() {
     console.warn('Container #globalStats não encontrado');
     return;
   }
-  try {
-    console.log('📊 Buscando estatísticas gerais...');
-    const response = await fetch(`${API}/api/estatisticas-gerais`);
-    const data = await response.json();
-    console.log('📊 Dados estatísticas:', data);
-    
-    if (data.sucesso) {
-      container.innerHTML = `
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 24px;">
-          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border-left: 4px solid #667eea; transition: transform 0.2s hover; cursor: default;">
-            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">📦 Produtos Mapeados</div>
-            <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_produtos || 0).toLocaleString('pt-BR')}</div>
-          </div>
-          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border-left: 4px solid #764ba2;">
-            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">🏢 Fornecedores</div>
-            <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_fornecedores || 0).toLocaleString('pt-BR')}</div>
-          </div>
-          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border-left: 4px solid #4caf50;">
-            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">🌎 Cidades Atendidas</div>
-            <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_cidades || 0).toLocaleString('pt-BR')}</div>
-          </div>
-        </div>`;
-    } else {
-      console.warn('Estatísticas falharam:', data.erro);
-    }
-  } catch (e) {
-    console.error('Erro estatísticas:', e);
+  console.log('📊 Buscando estatísticas gerais...');
+  const data = await fetchComRetry(`${API}/api/estatisticas-gerais`);
+  console.log('📊 Dados estatísticas:', data);
+  
+  if (data && data.sucesso) {
+    container.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 24px;">
+        <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-left: 4px solid #667eea;">
+          <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">📦 Produtos Mapeados</div>
+          <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_produtos || 0).toLocaleString('pt-BR')}</div>
+        </div>
+        <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-left: 4px solid #764ba2;">
+          <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">🏢 Fornecedores</div>
+          <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_fornecedores || 0).toLocaleString('pt-BR')}</div>
+        </div>
+        <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border-left: 4px solid #4caf50;">
+          <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">🌎 Cidades Atendidas</div>
+          <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_cidades || 0).toLocaleString('pt-BR')}</div>
+        </div>
+      </div>`;
+  } else {
+    console.warn('Estatísticas falharam:', data?.erro);
   }
 }
 
@@ -970,24 +996,31 @@ function setupEventListeners() {
   document.getElementById('selectFilesBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = false; fileInput.multiple = true; fileInput.click(); });
   document.getElementById('selectFolderBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = true; fileInput.click(); });
 
+  // === SIDEBAR MOBILE ===
   const menuToggle = document.getElementById('menuToggle');
   const sidebar = document.getElementById('sidebar');
   if (menuToggle && sidebar) {
     console.log('✅ Menu toggle e sidebar encontrados');
-    menuToggle.addEventListener('click', (e) => {
-      console.log('🖱️ Clique no menu toggle');
+    
+    // Usar tanto click quanto touchend para garantir funcionamento mobile
+    function toggleSidebar(e) {
+      e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation();
       sidebar.classList.toggle('open');
-      console.log('Sidebar aberta?', sidebar.classList.contains('open'));
-    });
+      console.log('🖱️ Sidebar toggled:', sidebar.classList.contains('open'));
+    }
+    
+    menuToggle.addEventListener('click', toggleSidebar, { passive: false });
+    menuToggle.addEventListener('touchend', toggleSidebar, { passive: false });
   } else {
     console.error('❌ Elementos de menu não encontrados:', { menuToggle, sidebar });
   }
 
-  // Fechar sidebar ao clicar fora no mobile
+  // Fechar sidebar ao clicar/tocar fora no mobile
   document.addEventListener('click', (e) => {
     if (window.innerWidth <= 768 && sidebar && menuToggle) {
-      if (!sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
+      if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !menuToggle.contains(e.target)) {
         sidebar.classList.remove('open');
       }
     }
