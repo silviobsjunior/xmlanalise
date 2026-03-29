@@ -156,6 +156,7 @@ async function initAuth() {
 
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user) {
+      console.log('✅ Evento SIGNED_IN detectado:', session.user.email);
       currentUser = session.user;
       currentToken = session.access_token;
       await verificarAdmin();
@@ -990,7 +991,7 @@ function setupEventListeners() {
   document.getElementById('buscaTermo')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') executarBusca(); });
   document.getElementById('filtroCidade')?.addEventListener('change', (e) => {
     popularBairros(e.target.value);
-    executarBusca();
+    // Removida a busca automática para evitar execução sem termo definido
   });
   document.getElementById('filtroBairro')?.addEventListener('change', executarBusca);
   document.getElementById('limparFiltrosBtn')?.addEventListener('click', () => {
@@ -1081,6 +1082,9 @@ function setupEventListeners() {
 
   document.getElementById('searchInput')?.addEventListener('input', debounce((e) => loadNotas(e.target.value, 1), 300));
   
+  // Inicializa autenticação para verificar se retornou do login social
+  initAuth();
+
   // Carrega estatísticas gerais do dashboard ao iniciar
   carregarEstatisticasGerais();
 }
