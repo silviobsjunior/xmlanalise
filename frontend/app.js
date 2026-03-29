@@ -397,23 +397,25 @@ async function tentarLocalizacaoPorIP() {
 
 function selecionarCidadeNosFiltros(nomeCidade) {
   const selectCidade = document.getElementById('filtroCidade');
-  if (!selectCidade) return;
+  if (!selectCidade || !nomeCidade) return;
   const cidadeUP = nomeCidade.toUpperCase().trim();
   
   let encontrada = false;
   for (let i = 0; i < selectCidade.options.length; i++) {
     const optVal = selectCidade.options[i].value.toUpperCase().trim();
-    if (optVal === cidadeUP || cidadeUP.includes(optVal) || optVal.includes(cidadeUP)) {
+    if (optVal && (optVal === cidadeUP || cidadeUP.includes(optVal) || optVal.includes(cidadeUP))) {
       selectCidade.selectedIndex = i;
-      popularBairros(selectCidade.value);
+      selectCidade.dispatchEvent(new Event('change'));
       encontrada = true;
-      showToast(`📍 Localização detectada: ${selectCidade.options[i].textContent}`, 'info');
+      showToast(`📍 ${nomeCidade} detectada e selecionada!`, 'success');
+      console.log(`✅ Cidade auto-selecionada: ${selectCidade.options[i].textContent}`);
       break;
     }
   }
 
   if (!encontrada) {
-    console.log(`Cidade ${nomeCidade} não encontrada nos filtros disponíveis.`);
+    showToast(`📍 Localização detectada: ${nomeCidade} (não disponível nos filtros)`, 'info');
+    console.log(`ℹ️ Cidade ${nomeCidade} não encontrada nos filtros disponíveis.`);
   }
 }
 
