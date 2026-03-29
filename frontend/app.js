@@ -51,20 +51,30 @@ async function initSupabase() {
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('🚀 Inicializando xmlAnalise...');
 
-  const supabaseReady = await initSupabase();
-  if (!supabaseReady) {
-    showToast('Erro ao conectar com servidor de autenticação', 'error');
+  // 1. Setup imediato de eventos (não bloqueia UI)
+  setupEventListeners();
+  setupNcmAutocomplete();
+
+  // 2. Carrega filtros base IMEDIATAMENTE (não espera o auth pendente)
+  carregarFiltros().then(() => {
+    console.log('✅ Filtros base carregados');
+  }).catch(e => console.error('❌ Erro carregando filtros iniciais:', e));
+
+  // 3. Inicializa Supabase e Auth em paralelo
+  try {
+    const supabaseReady = await initSupabase();
+    if (!supabaseReady) {
+      showToast('Modo offline/visitante ativo', 'info');
+      showAnonymousUser();
+    } else {
+      await initAuth();
+    }
+  } catch (e) {
+    console.error('Erro na inicialização do Auth:', e);
     showAnonymousUser();
-  } else {
-    await initAuth();
   }
 
-  setupEventListeners();
-  await carregarFiltros();
-  setupNcmAutocomplete();
   await carregarEstatisticasGerais();
-
-  // Aba busca é a padrão
 });
 
 // ============================================================
@@ -249,18 +259,26 @@ function showAnonymousUser() {
 // FILTROS E BUSCA DINÂMICA
 // ============================================================
 async function carregarFiltros() {
+  console.log('📡 Buscando filtros base do servidor...');
   try {
     const res = await fetch(`${API}/api/filtros-vendedores`);
     const data = await res.json();
-    if (!data.sucesso) return;
+    console.log('📦 Dados de filtros recebidos:', data);
+    
+    if (!data.sucesso) {
+      console.warn('Backend retornou erro nos filtros:', data.erro);
+      return;
+    }
 
     baseFiltrosGlobal.cidades = data.cidades || [];
     baseFiltrosGlobal.bairros = data.bairros || [];
     
-    repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros);
+    console.log(`✅ Base global: ${baseFiltrosGlobal.cidades.length} cidades, ${baseFiltrosGlobal.bairros.length} bairros`);
+    
+    repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros, false);
     detectarLocalizacaoUsuario();
   } catch (e) {
-    console.error('Erro filtros:', e);
+    console.error('❌ Erro fatal ao carregar filtros iniciais:', e);
   }
 }
 
@@ -315,6 +333,7 @@ function popularBairros(cidadeFiltro, listaBairros = null) {
 }
 
 async function detectarLocalizacaoUsuario() {
+  console.log('📍 Detectando localização...');
   if ("geolocation" in navigator) {
     navigator.geolocation.getCurrentPosition(async (position) => {
       try {
@@ -322,10 +341,19 @@ async function detectarLocalizacaoUsuario() {
         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
         const data = await res.json();
         const cidade = data.address.city || data.address.town || data.address.village;
+        console.log('🏙️ Cidade detectada por GPS:', cidade);
         if (cidade) selecionarCidadeNosFiltros(cidade);
-      } catch (e) { tentarLocalizacaoPorIP(); }
-    }, () => tentarLocalizacaoPorIP(), { timeout: 5000 });
-  } else { tentarLocalizacaoPorIP(); }
+      } catch (e) { 
+        console.warn('Falha reverse geocode, tentando IP');
+        tentarLocalizacaoPorIP(); 
+      }
+    }, (err) => {
+      console.warn('GPS negado ou falhou:', err.message);
+      tentarLocalizacaoPorIP();
+    }, { timeout: 8000, enableHighAccuracy: true });
+  } else { 
+    tentarLocalizacaoPorIP(); 
+  }
 }
 
 async function tentarLocalizacaoPorIP() {
@@ -339,14 +367,22 @@ async function tentarLocalizacaoPorIP() {
 function selecionarCidadeNosFiltros(nomeCidade) {
   const selectCidade = document.getElementById('filtroCidade');
   if (!selectCidade) return;
-  const cidadeUP = nomeCidade.toUpperCase();
+  const cidadeUP = nomeCidade.toUpperCase().trim();
+  
+  let encontrada = false;
   for (let i = 0; i < selectCidade.options.length; i++) {
-    if (selectCidade.options[i].value.toUpperCase() === cidadeUP || 
-        cidadeUP.includes(selectCidade.options[i].value.toUpperCase())) {
+    const optVal = selectCidade.options[i].value.toUpperCase().trim();
+    if (optVal === cidadeUP || cidadeUP.includes(optVal) || optVal.includes(cidadeUP)) {
       selectCidade.selectedIndex = i;
       popularBairros(selectCidade.value);
+      encontrada = true;
+      showToast(`📍 Localização detectada: ${selectCidade.options[i].textContent}`, 'info');
       break;
     }
+  }
+
+  if (!encontrada) {
+    console.log(`Cidade ${nomeCidade} não encontrada nos filtros disponíveis.`);
   }
 }
 
