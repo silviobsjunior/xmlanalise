@@ -746,6 +746,19 @@ function mostrarConfirmacaoUpload(files) {
   };
 }
 
+function handleDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const uploadArea = document.getElementById('uploadArea');
+  if (uploadArea) uploadArea.classList.remove('dragover');
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.xml'));
+  if (files.length > 0) {
+    processMultipleFiles(files);
+  } else {
+    showToast('Nenhum arquivo XML encontrado', 'error');
+  }
+}
+
 async function processMultipleFiles(files) {
   if (!files || files.length === 0) return;
   mostrarConfirmacaoUpload(files);
@@ -983,18 +996,22 @@ function setupEventListeners() {
     showToast('Filtros limpos', 'info');
   });
 
-  const uploadArea = document.getElementById('uploadArea');
-  const fileInput = document.getElementById('fileInput');
-  if (uploadArea) {
-    uploadArea.addEventListener('click', () => fileInput.click());
-    uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
-    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
-    uploadArea.addEventListener('drop', handleDrop);
+  try {
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    if (uploadArea && fileInput) {
+      uploadArea.addEventListener('click', () => fileInput.click());
+      uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+      uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+      uploadArea.addEventListener('drop', handleDrop);
+    }
+    fileInput?.addEventListener('change', (e) => processMultipleFiles(Array.from(e.target.files)));
+    
+    document.getElementById('selectFilesBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = false; fileInput.multiple = true; fileInput.click(); });
+    document.getElementById('selectFolderBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = true; fileInput.click(); });
+  } catch (e) {
+    console.error('Erro configurando upload:', e);
   }
-  fileInput?.addEventListener('change', (e) => processMultipleFiles(Array.from(e.target.files)));
-  
-  document.getElementById('selectFilesBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = false; fileInput.multiple = true; fileInput.click(); });
-  document.getElementById('selectFolderBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = true; fileInput.click(); });
 
   // === SIDEBAR MOBILE ===
   const menuToggle = document.getElementById('menuToggle');
