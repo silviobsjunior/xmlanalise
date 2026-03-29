@@ -398,12 +398,21 @@ async function tentarLocalizacaoPorIP() {
 function selecionarCidadeNosFiltros(nomeCidade) {
   const selectCidade = document.getElementById('filtroCidade');
   if (!selectCidade || !nomeCidade) return;
-  const cidadeUP = nomeCidade.toUpperCase().trim();
+  
+  // Normaliza removendo acentos, convertendo para uppercase e removendo espaços extras
+  function normalizar(str) {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+  }
+  
+  const cidadeNorm = normalizar(nomeCidade);
+  console.log(`📍 Procurando "${nomeCidade}" (normalizado: "${cidadeNorm}") em ${selectCidade.options.length} opções`);
   
   let encontrada = false;
-  for (let i = 0; i < selectCidade.options.length; i++) {
-    const optVal = selectCidade.options[i].value.toUpperCase().trim();
-    if (optVal && (optVal === cidadeUP || cidadeUP.includes(optVal) || optVal.includes(cidadeUP))) {
+  for (let i = 1; i < selectCidade.options.length; i++) { // pula index 0 ("Todas as cidades")
+    const optValue = normalizar(selectCidade.options[i].value);
+    const optText = normalizar(selectCidade.options[i].textContent);
+    
+    if (optValue === cidadeNorm || optText.startsWith(cidadeNorm) || cidadeNorm === optValue.split(' - ')[0] || cidadeNorm === optValue.split(' — ')[0]) {
       selectCidade.selectedIndex = i;
       selectCidade.dispatchEvent(new Event('change'));
       encontrada = true;
@@ -415,7 +424,7 @@ function selecionarCidadeNosFiltros(nomeCidade) {
 
   if (!encontrada) {
     showToast(`📍 Localização detectada: ${nomeCidade} (não disponível nos filtros)`, 'info');
-    console.log(`ℹ️ Cidade ${nomeCidade} não encontrada nos filtros disponíveis.`);
+    console.log(`ℹ️ Cidade "${nomeCidade}" (${cidadeNorm}) não encontrada nas opções disponíveis.`);
   }
 }
 
