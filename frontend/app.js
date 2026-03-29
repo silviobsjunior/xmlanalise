@@ -14,7 +14,6 @@ let todosOsBairros = [];
 let baseFiltrosGlobal = { cidades: [], bairros: [] };
 let filtrosEncontradosNaBusca = { cidades: [], bairros: [] }; // Persiste os locais encontrados no termo atual
 let resultadosBuscaAtuais = [];
-let paginacaoState = { pagina: 1, porPagina: 50, total: 0, totalPaginas: 0, search: '' };
 
 // ============================================================
 // CONFIGURAÇÕES E SUPABASE
@@ -72,14 +71,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 // AUTENTICAÇÃO E PERMISSÕES
 // ============================================================
 async function verificarAdmin() {
+  if (!currentToken) {
+    userIsAdmin = false;
+    return;
+  }
   try {
-    const headers = {};
-    if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
-    
-    const res = await fetch(`${API}/api/me`, { headers });
+    const res = await fetch(`${API}/api/debug-sessao`, {
+      headers: { 'Authorization': `Bearer ${currentToken}` }
+    });
     const data = await res.json();
-    
-    userIsAdmin = data.usuario?.isAdmin || false;
+    userIsAdmin = data.userInfo?.isAdmin || false;
     console.log('👑 Admin status:', userIsAdmin);
   } catch (e) {
     userIsAdmin = false;
@@ -209,8 +210,13 @@ function showUserLoggedIn(user) {
     }
   }
 
-  const banner = document.getElementById('loginBanner');
   if (banner) banner.style.display = 'none';
+
+  // Badge Admin se necessário
+  if (userIsAdmin) {
+    if (sidebarUserStatus) sidebarUserStatus.innerHTML = '<span class="badge-user" style="background:#764ba2;">Administrador</span>';
+    if (desktopUserName) desktopUserName.innerHTML = `${nome} <span class="badge-user" style="background:#764ba2; font-size:10px; padding:2px 8px;">ADMIN</span>`;
+  }
 }
 
 function showAnonymousUser() {
@@ -277,19 +283,22 @@ function repopularSelects(cidades, bairros, manterSelecao = true) {
   });
 
   if (manterSelecao) selectCidade.value = cidadeAtual;
-  popularBairrosComDados(bairros, selectCidade.value);
+  popularBairros(selectCidade.value, bairros);
 }
 
-function popularBairrosComDados(listaBairros, cidadeFiltro) {
+function popularBairros(cidadeFiltro, listaBairros = null) {
   const selectBairro = document.getElementById('filtroBairro');
   if (!selectBairro) return;
 
   const valorAtual = selectBairro.value;
   selectBairro.innerHTML = '<option value="">🏘️ Todos os bairros</option>';
 
+  // Se não passou lista, usa a base global ou a encontrada na busca
+  const fonte = listaBairros || (filtrosEncontradosNaBusca.bairros.length > 0 ? filtrosEncontradosNaBusca.bairros : baseFiltrosGlobal.bairros);
+
   const filtrados = cidadeFiltro 
-    ? listaBairros.filter(b => b.municipio === cidadeFiltro)
-    : listaBairros;
+    ? fonte.filter(b => b.municipio === cidadeFiltro)
+    : fonte;
 
   const bairrosUnicos = [...new Set(filtrados.map(b => b.bairro))].sort();
 
@@ -306,7 +315,6 @@ function popularBairrosComDados(listaBairros, cidadeFiltro) {
 }
 
 async function detectarLocalizacaoUsuario() {
-  // 1. Tenta por GPS (mais preciso, solicita permissão)
   if ("geolocation" in navigator) {
     navigator.geolocation.getCurrentPosition(async (position) => {
       try {
@@ -314,45 +322,29 @@ async function detectarLocalizacaoUsuario() {
         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
         const data = await res.json();
         const cidade = data.address.city || data.address.town || data.address.village;
-        
-        if (cidade) {
-          console.log(`📍 Localização GPS: ${cidade}`);
-          selecionarCidadeNosFiltros(cidade);
-        }
-      } catch (e) {
-        tentarLocalizacaoPorIP();
-      }
-    }, () => {
-      tentarLocalizacaoPorIP();
-    }, { timeout: 5000 });
-  } else {
-    tentarLocalizacaoPorIP();
-  }
+        if (cidade) selecionarCidadeNosFiltros(cidade);
+      } catch (e) { tentarLocalizacaoPorIP(); }
+    }, () => tentarLocalizacaoPorIP(), { timeout: 5000 });
+  } else { tentarLocalizacaoPorIP(); }
 }
 
 async function tentarLocalizacaoPorIP() {
   try {
     const res = await fetch('https://ipapi.co/json/');
     const data = await res.json();
-    if (data.city) {
-      console.log(`📍 Localização IP: ${data.city}`);
-      selecionarCidadeNosFiltros(data.city);
-    }
-  } catch (e) {
-    console.warn('Não foi possível detectar localização');
-  }
+    if (data.city) selecionarCidadeNosFiltros(data.city);
+  } catch (e) {}
 }
 
 function selecionarCidadeNosFiltros(nomeCidade) {
   const selectCidade = document.getElementById('filtroCidade');
   if (!selectCidade) return;
-
   const cidadeUP = nomeCidade.toUpperCase();
   for (let i = 0; i < selectCidade.options.length; i++) {
     if (selectCidade.options[i].value.toUpperCase() === cidadeUP || 
         cidadeUP.includes(selectCidade.options[i].value.toUpperCase())) {
       selectCidade.selectedIndex = i;
-      popularBairrosComDados(baseFiltrosGlobal.bairros, selectCidade.value);
+      popularBairros(selectCidade.value);
       break;
     }
   }
@@ -367,9 +359,17 @@ async function executarBusca() {
   const loading = document.getElementById('buscaLoading');
   const vazio = document.getElementById('buscaVazio');
   const resultadosDiv = document.getElementById('buscaResultados');
+  const vazioMsg = document.getElementById('buscaVazioMsg');
 
-  if (!termo || termo.length < 3) {
-    showToast('Digite pelo menos 3 caracteres', 'warning');
+  // Se não houver termo E não houver nenhum filtro, avisa
+  if (!termo && !cidade && !bairro && !ncm) {
+    showToast('Digite um termo ou use os filtros para buscar', 'warning');
+    return;
+  }
+
+  // Se houver termo, valida 3 caracteres (a menos que haja outros filtros)
+  if (termo && termo.length < 3 && !cidade && !bairro && !ncm) {
+    showToast('Digite pelo menos 3 caracteres para buscar', 'warning');
     return;
   }
 
@@ -378,7 +378,8 @@ async function executarBusca() {
   if (resultadosDiv) resultadosDiv.innerHTML = '';
 
   try {
-    const params = new URLSearchParams({ termo });
+    const params = new URLSearchParams();
+    if (termo) params.append('termo', termo);
     if (cidade) params.append('cidade', cidade);
     if (bairro) params.append('bairro', bairro);
     if (ncm) params.append('ncm', ncm);
@@ -390,16 +391,16 @@ async function executarBusca() {
 
     if (!data.sucesso || !data.resultados || data.resultados.length === 0) {
       if (vazio) vazio.style.display = 'block';
+      if (vazioMsg) vazioMsg.textContent = `Nenhum vendedor encontrado para os critérios informados.`;
       resultadosBuscaAtuais = [];
       return;
     }
 
     resultadosBuscaAtuais = data.resultados;
-    renderizarResultados(data.resultados, termo);
+    renderizarResultados(data.resultados, termo || '');
 
     // PERSISTÊNCIA: Extrai e guarda os filtros se for uma nova busca por termo
     const extraidos = extrairFiltrosDeResultados(data.resultados);
-    
     if (!cidade && !bairro) {
       filtrosEncontradosNaBusca = extraidos;
     } else if (filtrosEncontradosNaBusca.cidades.length === 0) {
@@ -445,26 +446,20 @@ function renderizarResultados(resultados, termo) {
     const enderecoCompleto = [v.logradouro, v.numero, v.complemento].filter(Boolean).join(', ');
     const localizacao = [v.cidade, v.uf].filter(Boolean).join(' — ');
 
-    const produtosHtml = item.produtos.slice(0, 10).map(p => {
+    const produtosHtml = item.produtos.slice(0, 5).map(p => {
       const ncmHtml = p.ncm 
         ? `<span onclick="setNcmFilter('${p.ncm}')" style="cursor:pointer; color:#667eea; text-decoration:underline; margin-left:4px; font-weight:600;" title="Clique para filtrar por este NCM">#${p.ncm}</span>`
         : '';
-      
-      const adminInfo = userIsAdmin && p.chave_acesso 
-        ? `<div style="font-size:10px; color:#999; margin-top:2px;">🔑 ${p.chave_acesso.substring(0, 20)}... (${p.perspectiva || '—'})</div>`
-        : '';
-
       return `
-        <div style="display:inline-block; background:#e8f0fe; color:#3c5fb5; border-radius:12px;
-                    padding:6px 12px; font-size:12px; margin:4px; border:1px solid #d0e0fb;">
-          <div>${p.cean ? `<strong>${p.cean}</strong> · ` : ''}${p.descricao || ''}${ncmHtml}</div>
-          ${adminInfo}
-        </div>
+        <span style="display:inline-block; background:#e8f0fe; color:#3c5fb5; border-radius:20px;
+                    padding:3px 10px; font-size:12px; margin:2px;">
+          ${p.cean ? `<strong>${p.cean}</strong> · ` : ''}${p.descricao || ''}${ncmHtml}
+        </span>
       `;
     }).join('');
 
-    const maisHtml = item.produtos.length > 10
-      ? `<span style="font-size:12px; color:#888; margin-left:4px;">+${item.produtos.length - 10} produto(s)</span>`
+    const maisHtml = item.produtos.length > 5
+      ? `<span style="font-size:12px; color:#888; margin-left:4px;">+${item.produtos.length - 5} produto(s)</span>`
       : '';
 
     const telHtml = v.telefone
@@ -860,70 +855,9 @@ async function viewNota(id) {
     const nota = await response.json();
     const modalBody = document.getElementById('modalBody');
     if (!modalBody) return;
-
-    let adminPanel = '';
-    if (userIsAdmin) {
-      adminPanel = `
-        <div style="background:#fff3cd; border:1px solid #ffeeba; padding:15px; border-radius:10px; margin-bottom:20px;">
-          <div style="font-weight:700; color:#856404; margin-bottom:8px;">👮 ADMIN: Alterar Perspectiva</div>
-          <div style="display:flex; gap:10px;">
-            <select id="adminPerspectivaSelect" style="flex:1; padding:8px; border-radius:6px; border:1px solid #ccc;">
-              <option value="emitente" ${nota.perspectiva_importador === 'emitente' ? 'selected' : ''}>🏪 Emitente (Venda)</option>
-              <option value="revendedor" ${nota.perspectiva_importador === 'revendedor' ? 'selected' : ''}>🔄 Revendedor (Compra p/ Revenda)</option>
-              <option value="consumidor" ${nota.perspectiva_importador === 'consumidor' ? 'selected' : ''}>🛒 Consumidor (Uso/Consumo)</option>
-            </select>
-            <button onclick="adminAlterarPerspectiva('${nota.chave_acesso}')" class="btn" style="padding:8px 15px; font-size:12px; background:#856404; border:none; color:white; border-radius:6px; cursor:pointer;">Atualizar</button>
-          </div>
-        </div>
-      `;
-    }
-
-    modalBody.innerHTML = `
-      ${adminPanel}
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:20px;">
-        <div class="card-modern" style="padding:15px; background:#f8fafc;">
-          <div style="font-size:11px; color:#999; text-transform:uppercase; margin-bottom:4px;">Chave de Acesso</div>
-          <div style="font-size:13px; font-weight:600; word-break:break-all;">${nota.chave_acesso}</div>
-        </div>
-        <div class="card-modern" style="padding:15px; background:#f8fafc;">
-          <div style="font-size:11px; color:#999; text-transform:uppercase; margin-bottom:4px;">Data de Emissão</div>
-          <div style="font-size:13px; font-weight:600;">${new Date(nota.data_emissao).toLocaleDateString('pt-BR')}</div>
-        </div>
-      </div>
-      <div style="font-size:14px; color:#444; margin-bottom:10px; font-weight:600;">📝 JSON Completo</div>
-      <pre style="font-size:12px;background:#f8fafc;padding:15px;border-radius:12px;overflow:auto;max-height:300px;border:1px solid #e2e8f0;">${JSON.stringify(nota, null, 2)}</pre>
-    `;
+    modalBody.innerHTML = `<pre style="font-size:12px;background:#f8fafc;padding:15px;border-radius:12px;overflow:auto;max-height:400px;">${JSON.stringify(nota, null, 2)}</pre>`;
     document.getElementById('xmlModal').classList.add('active');
-  } catch (e) { 
-    console.error('Erro viewNota:', e);
-    showToast('Erro ao carregar detalhes', 'error'); 
-  }
-}
-
-async function adminAlterarPerspectiva(chave_acesso) {
-  const nova_perspectiva = document.getElementById('adminPerspectivaSelect').value;
-  if (!confirm(`Alterar perspectiva para ${nova_perspectiva}?`)) return;
-
-  try {
-    const res = await fetch(`${API}/api/admin/alterar-perspectiva`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${currentToken}`
-      },
-      body: JSON.stringify({ chave_acesso, nova_perspectiva })
-    });
-    const data = await res.json();
-    if (data.sucesso) {
-      showToast('Perspectiva alterada!', 'success');
-      closeModal();
-      loadNotas();
-    } else {
-      showToast(data.erro || 'Erro ao alterar', 'error');
-    }
-  } catch (e) {
-    showToast('Erro de conexão', 'error');
-  }
+  } catch (e) { showToast('Erro ao carregar detalhes', 'error'); }
 }
 
 async function deleteNota(id) {
@@ -945,13 +879,36 @@ function setupEventListeners() {
 
   document.getElementById('buscaBtn')?.addEventListener('click', executarBusca);
   document.getElementById('buscaTermo')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') executarBusca(); });
-  document.getElementById('filtroCidade')?.addEventListener('change', (e) => popularBairros(e.target.value));
+  document.getElementById('filtroCidade')?.addEventListener('change', (e) => {
+    popularBairros(e.target.value);
+    executarBusca();
+  });
+  document.getElementById('filtroBairro')?.addEventListener('change', executarBusca);
   document.getElementById('limparFiltrosBtn')?.addEventListener('click', () => {
     document.getElementById('buscaTermo').value = '';
     document.getElementById('filtroCidade').value = '';
     document.getElementById('filtroBairro').value = '';
     document.getElementById('filtroNcm').value = '';
-    executarBusca();
+    
+    // Reset da persistência inteligente
+    filtrosEncontradosNaBusca = { cidades: [], bairros: [] };
+    resultadosBuscaAtuais = [];
+    
+    // Repopula com a base global original
+    repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros, false);
+    
+    // Limpa resultados visuais
+    const resultadosDiv = document.getElementById('buscaResultados');
+    if (resultadosDiv) resultadosDiv.innerHTML = '';
+    
+    const vazio = document.getElementById('buscaVazio');
+    if (vazio) {
+      vazio.style.display = 'block';
+      const vazioMsg = document.getElementById('buscaVazioMsg');
+      if (vazioMsg) vazioMsg.textContent = 'Digite um produto acima para buscar vendedores.';
+    }
+    
+    showToast('Filtros limpos', 'info');
   });
 
   const uploadArea = document.getElementById('uploadArea');

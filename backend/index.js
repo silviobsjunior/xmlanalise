@@ -774,10 +774,20 @@ app.get('/api/buscar-produtos', async (req, res) => {
     console.log(`\n${getTimestamp()} 🔍 BUSCA DE PRODUTOS`);
     try {
         const { termo, cidade, bairro, ncm } = req.query;
-        if (!termo || termo.length < 3)
-            return res.status(400).json({ sucesso: false, erro: 'Termo deve ter pelo menos 3 caracteres' });
+        
+        // Se nenhum filtro for passado
+        if (!termo && !cidade && !bairro && !ncm) {
+            return res.status(400).json({ sucesso: false, erro: 'Informe pelo menos um filtro (termo, cidade, bairro ou ncm)' });
+        }
 
-        const params = [`%${termo}%`];
+        const params = [];
+        let sqlTermo = 'TRUE';
+        
+        if (termo && termo.length >= 3) {
+            params.push(`%${termo}%`);
+            sqlTermo = `(p.codigo_barras ILIKE $${params.length} OR p.descricao ILIKE $${params.length})`;
+        }
+
         let filtroE = '', filtroD = '';
         if (cidade) { params.push(cidade); filtroE += ` AND e.municipio ILIKE $${params.length}`; filtroD += ` AND d.municipio ILIKE $${params.length}`; }
         if (bairro) { params.push(bairro); filtroE += ` AND e.bairro    ILIKE $${params.length}`; filtroD += ` AND d.bairro    ILIKE $${params.length}`; }
@@ -804,7 +814,7 @@ app.get('/api/buscar-produtos', async (req, res) => {
             JOIN atores a          ON nf.emitente_id = a.id
             JOIN emitentes e       ON a.identificador = e.cnpj
             WHERE e.cnpj IS NOT NULL
-              AND (p.codigo_barras ILIKE $1 OR p.descricao ILIKE $1) ${filtroE}
+              AND ${sqlTermo} ${filtroE}
 
             UNION ALL
 
@@ -823,7 +833,7 @@ app.get('/api/buscar-produtos', async (req, res) => {
             JOIN destinatarios d   ON a.identificador = d.cnpj
             WHERE nf.perspectiva_importador = 'revendedor'
               AND d.cnpj IS NOT NULL
-              AND (p.codigo_barras ILIKE $1 OR p.descricao ILIKE $1) ${filtroD}
+              AND ${sqlTermo} ${filtroD}
 
             ORDER BY data_emissao DESC LIMIT 300
         `;

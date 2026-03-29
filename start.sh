@@ -51,16 +51,25 @@ check_deps() {
     fi
 
     # Instala dependências Python se necessário
-    if [ ! -f "$VENV_DIR/lib/python3*/site-packages/uvicorn/__init__.py" ] 2>/dev/null; then
+    echo "🔍 Verificando uvicorn em $VENV_DIR/bin/python3"
+    UVICORN_OK=0
+    if "$VENV_DIR/bin/python3" -m uvicorn --version >/dev/null 2>&1; then
+        UVICORN_OK=1
+        echo "✅ uvicorn encontrado!"
+    else
+        echo "❌ uvicorn NÃO encontrado ou falhou!"
+    fi
+    
+    if [ $UVICORN_OK -eq 0 ]; then
         echo -e "${YELLOW}⚙️  Instalando dependências Python...${NC}"
-        "$VENV_DIR/bin/pip" install -q -r "$BACKEND_DIR/requirements.txt"
+        "$VENV_DIR/bin/python3" -m pip install -q -r "$BACKEND_DIR/requirements.txt"
     fi
 }
 
 start_node() {
     echo -e "${GREEN}▶  Iniciando servidor Node.js (porta 3000)...${NC}"
     cd "$BACKEND_DIR"
-    node index.js &
+    node index.js > ../server.log 2>&1 &
     NODE_PID=$!
     echo $NODE_PID >> "$PID_FILE"
     echo -e "${GREEN}   ✅ Node.js rodando (PID: $NODE_PID)${NC}"
@@ -70,7 +79,7 @@ start_node() {
 start_python() {
     echo -e "${GREEN}▶  Iniciando FastAPI Python (porta 8000)...${NC}"
     cd "$BACKEND_DIR"
-    "$VENV_DIR/bin/uvicorn" main:app --host 0.0.0.0 --port 8000 --reload &
+    "$VENV_DIR/bin/python3" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload > ../fastapi.log 2>&1 &
     PYTHON_PID=$!
     echo $PYTHON_PID >> "$PID_FILE"
     echo -e "${GREEN}   ✅ FastAPI rodando (PID: $PYTHON_PID)${NC}"
