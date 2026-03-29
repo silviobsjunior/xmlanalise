@@ -824,28 +824,38 @@ async function loadNotas(search = '', pagina = 1, porPagina = null) {
 
 async function carregarEstatisticasGerais() {
   const container = document.getElementById('globalStats');
-  if (!container) return;
+  if (!container) {
+    console.warn('Container #globalStats não encontrado');
+    return;
+  }
   try {
+    console.log('📊 Buscando estatísticas gerais...');
     const response = await fetch(`${API}/api/estatisticas-gerais`);
     const data = await response.json();
+    console.log('📊 Dados estatísticas:', data);
+    
     if (data.sucesso) {
       container.innerHTML = `
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 24px;">
-          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #667eea;">
-            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; margin-bottom: 8px;">📦 Produtos Mapeados</div>
-            <div style="font-size: 24px; font-weight: 700; color: #1a1f36;">${data.total_produtos.toLocaleString('pt-BR')}</div>
+          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border-left: 4px solid #667eea; transition: transform 0.2s hover; cursor: default;">
+            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">📦 Produtos Mapeados</div>
+            <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_produtos || 0).toLocaleString('pt-BR')}</div>
           </div>
-          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #764ba2;">
-            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; margin-bottom: 8px;">🏢 Fornecedores</div>
-            <div style="font-size: 24px; font-weight: 700; color: #1a1f36;">${data.total_fornecedores.toLocaleString('pt-BR')}</div>
+          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border-left: 4px solid #764ba2;">
+            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">🏢 Fornecedores</div>
+            <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_fornecedores || 0).toLocaleString('pt-BR')}</div>
           </div>
-          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-left: 4px solid #4caf50;">
-            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; margin-bottom: 8px;">City Cidades Atendidas</div>
-            <div style="font-size: 24px; font-weight: 700; color: #1a1f36;">${data.total_cidades.toLocaleString('pt-BR')}</div>
+          <div style="background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border-left: 4px solid #4caf50;">
+            <div style="font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; margin-bottom: 8px;">🌎 Cidades Atendidas</div>
+            <div style="font-size: 26px; font-weight: 800; color: #1a1f36;">${(data.total_cidades || 0).toLocaleString('pt-BR')}</div>
           </div>
         </div>`;
+    } else {
+      console.warn('Estatísticas falharam:', data.erro);
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Erro estatísticas:', e);
+  }
 }
 
 function renderPaginacao(pag) {
@@ -963,7 +973,15 @@ function setupEventListeners() {
   const menuToggle = document.getElementById('menuToggle');
   const sidebar = document.getElementById('sidebar');
   if (menuToggle && sidebar) {
-    menuToggle.addEventListener('click', () => sidebar.classList.toggle('open'));
+    console.log('✅ Menu toggle e sidebar encontrados');
+    menuToggle.addEventListener('click', (e) => {
+      console.log('🖱️ Clique no menu toggle');
+      e.stopPropagation();
+      sidebar.classList.toggle('open');
+      console.log('Sidebar aberta?', sidebar.classList.contains('open'));
+    });
+  } else {
+    console.error('❌ Elementos de menu não encontrados:', { menuToggle, sidebar });
   }
 
   // Fechar sidebar ao clicar fora no mobile
