@@ -1111,6 +1111,31 @@ app.post('/api/processar-xml', upload.single('xml'), async (req, res) => {
 
         console.log(`${getTimestamp()} 🔍 Extraindo dados completos da NF-e...`);
         const nfeData = new NFEParser(resultado).extrairDadosCompletos();
+        
+        // PADRONIZAÇÃO DE CIDADES
+        if (nfeData.emitente?.endereco) {
+            const resolved = await resolveMunicipio(
+                nfeData.emitente.endereco.codigo_municipio,
+                nfeData.emitente.endereco.municipio,
+                nfeData.emitente.endereco.uf
+            );
+            nfeData.emitente.endereco.municipio = resolved.nome;
+            nfeData.emitente.endereco.uf = resolved.uf;
+            nfeData.emitente.municipio = resolved.nome;
+            nfeData.emitente.uf = resolved.uf;
+        }
+        if (nfeData.destinatario?.endereco) {
+            const resolved = await resolveMunicipio(
+                nfeData.destinatario.endereco.codigo_municipio,
+                nfeData.destinatario.endereco.municipio,
+                nfeData.destinatario.endereco.uf
+            );
+            nfeData.destinatario.endereco.municipio = resolved.nome;
+            nfeData.destinatario.endereco.uf = resolved.uf;
+            nfeData.destinatario.municipio = resolved.nome;
+            nfeData.destinatario.uf = resolved.uf;
+        }
+
         console.log(`${getTimestamp()} 📊 Dados extraídos:`, Object.keys(nfeData));
 
         // =============================================

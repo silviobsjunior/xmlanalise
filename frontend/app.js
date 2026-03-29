@@ -182,13 +182,24 @@ function getAnonymousSessionId() {
 }
 
 async function loginWithGoogle() {
+  console.log('🚀 Iniciando redirecionamento para o Google...');
+  showToast('Iniciando login com Google...', 'info');
+  
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin
+      redirectTo: window.location.origin,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      }
     }
   });
-  if (error) showToast('Erro ao iniciar login com Google', 'error');
+  
+  if (error) {
+    console.error('❌ Erro no login Google:', error);
+    showToast('Erro ao iniciar login: ' + error.message, 'error');
+  }
 }
 
 async function logout() {
@@ -485,7 +496,9 @@ async function executarBusca() {
       filtrosEncontradosNaBusca = extraidos;
     }
 
-    repopularSelects(filtrosEncontradosNaBusca.cidades, filtrosEncontradosNaBusca.bairros, true);
+    // Bugfix: Sempre usamos a lista GLOBAL de cidades para evitar que a lista encolha 
+    // após uma auto-seleção ou busca específica, conforme solicitado pelo usuário.
+    repopularSelects(baseFiltrosGlobal.cidades, filtrosEncontradosNaBusca.bairros, true);
 
   } catch (e) {
     if (loading) loading.style.display = 'none';
@@ -1067,6 +1080,9 @@ function setupEventListeners() {
   });
 
   document.getElementById('searchInput')?.addEventListener('input', debounce((e) => loadNotas(e.target.value, 1), 300));
+  
+  // Carrega estatísticas gerais do dashboard ao iniciar
+  carregarEstatisticasGerais();
 }
 
 function showToast(message, type = 'info') {
