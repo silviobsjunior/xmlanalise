@@ -269,6 +269,7 @@ function showUserLoggedIn(user) {
     }
   }
 
+  const banner = document.getElementById('loginBanner');
   if (banner) banner.style.display = 'none';
 
   // Badge Admin se necessário
