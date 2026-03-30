@@ -676,7 +676,8 @@ app.get('/api/filtros-vendedores', async (req, res) => {
             SELECT DISTINCT e.municipio, e.uf FROM emitentes e
             INNER JOIN atores a ON a.identificador = e.cnpj
             INNER JOIN notas_fiscais nf ON nf.emitente_id = a.id
-            WHERE e.municipio IS NOT NULL AND e.municipio != ''
+            WHERE nf.perspectiva_importador = 'emitente'
+              AND e.municipio IS NOT NULL AND e.municipio != ''
             UNION
             SELECT DISTINCT d.municipio, d.uf FROM destinatarios d
             INNER JOIN atores a ON a.identificador = d.cnpj
@@ -689,7 +690,8 @@ app.get('/api/filtros-vendedores', async (req, res) => {
             SELECT DISTINCT e.bairro, e.municipio, e.uf FROM emitentes e
             INNER JOIN atores a ON a.identificador = e.cnpj
             INNER JOIN notas_fiscais nf ON nf.emitente_id = a.id
-            WHERE e.bairro IS NOT NULL AND e.bairro != ''
+            WHERE nf.perspectiva_importador = 'emitente'
+              AND e.bairro IS NOT NULL AND e.bairro != ''
             UNION
             SELECT DISTINCT d.bairro, d.municipio, d.uf FROM destinatarios d
             INNER JOIN atores a ON a.identificador = d.cnpj
@@ -814,6 +816,7 @@ app.get('/api/buscar-produtos', async (req, res) => {
             JOIN atores a          ON nf.emitente_id = a.id
             JOIN emitentes e       ON a.identificador = e.cnpj
             WHERE e.cnpj IS NOT NULL
+              AND nf.perspectiva_importador = 'emitente'
               AND ${sqlTermo} ${filtroE}
 
             UNION ALL
