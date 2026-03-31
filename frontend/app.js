@@ -823,8 +823,11 @@ async function executarUpload(files) {
 async function uploadXML(file) {
   const formData = new FormData();
   formData.append('xml', file);
-  const perspectivaBackend = perspectivaPadrao === 'revendedor' ? 'revendedor' : 'emitente';
-  formData.append('perspectiva', perspectivaBackend);
+  
+  // Mapeia a perspectiva selecionada para o backend
+  // perspectivaPadrao pode ser 'consumidor', 'emitente' ou 'revendedor'
+  formData.append('perspectiva', perspectivaPadrao);
+  
   const headers = {};
   if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
   const response = await fetch(`${API}/api/processar-xml`, {

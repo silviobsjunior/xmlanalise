@@ -44,7 +44,7 @@ class NFEParser {
             const emit = inf.emit || {};
             const dest = inf.dest || {};
             const det = inf.det;
-            const icmstot = (inf.total || {}).ictot || {};
+            const icmstot = (inf.total || {}).icmstot || {};
             const transp = inf.transp || {};
             const cobr = inf.cobr || {};
             const infadic = inf.infadic || {};

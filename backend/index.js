@@ -56,7 +56,63 @@ pool.on('error', (err) => {
 });
 
 // =============================================
-// FUNÇÃO PARA GARANTIR QUE USUÁRIO EXISTE NO BANCO LOCAL
+// FUNÇÃO PARA RESOLVER/PADRONIZAR MUNICÍPIO
+// =============================================
+async function resolveMunicipio(codigoIbge, nomeOriginal, ufOriginal) {
+    if (!codigoIbge && !nomeOriginal) {
+        return { nome: nomeOriginal, uf: ufOriginal };
+    }
+    
+    try {
+        let query, params;
+        
+        if (codigoIbge) {
+            // Se tiver código IBGE, usa ele (7 dígitos)
+            const ibge7 = String(codigoIbge).substring(0, 7);
+            query = `
+                SELECT m.nome, u.sigla as uf
+                FROM municipios m
+                JOIN ufs u ON m.codigo_uf = u.codigo_uf
+                WHERE m.codigo_ibge = $1
+                LIMIT 1
+            `;
+            params = [ibge7];
+        } else {
+            // Se não tiver código, tenta buscar por nome e UF originais
+            query = `
+                SELECT m.nome, u.sigla as uf
+                FROM municipios m
+                JOIN ufs u ON m.codigo_uf = u.codigo_uf
+                WHERE UPPER(m.nome) = UPPER($1) AND u.sigla = UPPER($2)
+                LIMIT 1
+            `;
+            params = [nomeOriginal, ufOriginal];
+        }
+        
+        const { rows } = await pool.query(query, params);
+        
+        if (rows.length > 0) {
+            return {
+                nome: rows[0].nome.toUpperCase(),
+                uf: rows[0].uf
+            };
+        }
+        
+        // Se ainda não encontrou, retorna os valores originais tratados
+        console.log(`${getTimestamp()} ℹ️ Município não encontrado no BD: ${nomeOriginal} (${codigoIbge}) - Mantendo original.`);
+        return {
+            nome: nomeOriginal ? nomeOriginal.toUpperCase().trim() : nomeOriginal,
+            uf: ufOriginal ? ufOriginal.toUpperCase().trim() : ufOriginal
+        };
+    } catch (error) {
+        console.error(`${getTimestamp()} ⚠️ Erro ao resolver município:`, error.message);
+        return {
+            nome: nomeOriginal ? nomeOriginal.toUpperCase().trim() : nomeOriginal,
+            uf: ufOriginal ? ufOriginal.toUpperCase().trim() : ufOriginal
+        };
+    }
+}
+
 // =============================================
 // FUNÇÃO PARA GARANTIR QUE USUÁRIO EXISTE NO BANCO LOCAL
 // =============================================
