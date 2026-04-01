@@ -1575,7 +1575,7 @@ app.post('/api/incluir-manual', async (req, res) => {
     const userInfo = req.userInfo;
 
     try {
-        const { vendedor, produto, data_emissao } = req.body;
+        const { vendedor, produto, data_emissao, perspectiva = 'vendedor' } = req.body;
 
         if (!vendedor || !produto) {
             return res.status(400).json({ sucesso: false, erro: 'Dados de vendedor e produto são obrigatórios' });
@@ -1583,7 +1583,7 @@ app.post('/api/incluir-manual', async (req, res) => {
 
         await client.query('BEGIN');
 
-        // 1. INSERIR/OBTER EMITENTE (Vendedor)
+        // 1. INSERIR/OBTER EMITENTE (Fornecedor informado)
         let idEmitenteInt = null;
         const emitenteExistente = await client.query(
             `SELECT id FROM emitentes WHERE cnpj = $1`, [vendedor.cnpj]
@@ -1591,7 +1591,6 @@ app.post('/api/incluir-manual', async (req, res) => {
 
         if (emitenteExistente.rows.length > 0) {
             idEmitenteInt = emitenteExistente.rows[0].id;
-            // Atualizar dados se necessário
             await client.query(
                 `UPDATE emitentes SET 
                     razao_social = $1, nome_fantasia = $2, telefone = $3,
@@ -1643,59 +1642,62 @@ app.post('/api/incluir-manual', async (req, res) => {
             emitenteUUID = result.rows[0].id;
         }
 
-        // 3. CRIAR NOTA FISCAL MANUAL (DUMMY)
-        const manualChave = `MANUAL-${crypto.randomUUID()}`;
-        const manualData = data_emissao || new Date().toISOString();
-        
-        // Ator consumidor padrão para nota manual
+        // 3. DEFINIR DESTINATÁRIO (DUMMY OU USUÁRIO)
         let destinatarioUUID = null;
         const atorConsumidor = await client.query(`SELECT id FROM atores WHERE identificador = 'CONSUMIDOR_FINAL' LIMIT 1`);
-        if (atorConsumidor.rows.length > 0) {
-            destinatarioUUID = atorConsumidor.rows[0].id;
-        } else {
-            const result = await client.query(
-                `INSERT INTO atores (tipo_identificador, identificador, razao_social, nome_fantasia, tipo_pessoa, created_at, updated_at)
-                 VALUES ('OUT', 'CONSUMIDOR_FINAL', 'Consumidor Final Não Identificado', 'Consumidor Final', 'FISICA', NOW(), NOW())
-                 RETURNING id`
-            );
-            destinatarioUUID = result.rows[0].id;
-        }
+        destinatarioUUID = atorConsumidor.rows[0].id;
 
+        const manualData = data_emissao || new Date().toISOString();
         const usuarioId = userInfo.type === 'user' ? userInfo.id : null;
         const sessaoAnonimaId = userInfo.type === 'anonymous' ? userInfo.id : null;
 
-        await client.query(
-            `INSERT INTO notas_fiscais (
-                chave_acesso, numero, serie, data_emissao, status,
-                emitente_id, destinatario_id, usuario_id, sessao_anonima_id,
-                perspectiva_importador, valor_total_nota, created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-            [
-                manualChave, 0, 0, manualData, 'MANUAL',
-                emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId,
-                'emitente', (produto.valor_unitario * produto.quantidade),
-            ]
-        );
+        // 4. FUNÇÃO AUXILIAR PARA CRIAR O REGISTRO
+        async function salvarNotaEProduto(pImportador) {
+            const manualChave = `MANUAL-${pImportador}-${crypto.randomUUID()}`;
+            
+            await client.query(
+                `INSERT INTO notas_fiscais (
+                    chave_acesso, numero, serie, data_emissao, status,
+                    emitente_id, destinatario_id, usuario_id, sessao_anonima_id,
+                    perspectiva_importador, valor_total_nota, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+                [
+                    manualChave, 0, 0, manualData, 'MANUAL',
+                    emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId,
+                    pImportador, (produto.valor_unitario * produto.quantidade),
+                ]
+            );
 
-        // 4. INSERIR EM NFE_IMPORTADAS
-        const resultImport = await client.query(
-            `INSERT INTO nfe_importadas (chave_acesso, numero, serie, data_emissao, created_at)
-             VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
-            [manualChave, 0, 0, manualData]
-        );
-        const idNfeImportada = resultImport.rows[0].id;
+            const resultImport = await client.query(
+                `INSERT INTO nfe_importadas (chave_acesso, numero, serie, data_emissao, created_at)
+                 VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
+                [manualChave, 0, 0, manualData]
+            );
+            
+            const idNfeImportada = resultImport.rows[0].id;
 
-        // 5. INSERIR PRODUTO
-        await client.query(
-            `INSERT INTO produtos_nfe (nfe_id, numero_item, codigo_produto, codigo_barras,
-                descricao, ncm, quantidade, valor_unitario, valor_total, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
-            [
-                idNfeImportada, 1, 'MANUAL', produto.codigo_barras || null,
-                produto.descricao, produto.ncm, produto.quantidade,
-                produto.valor_unitario, (produto.valor_unitario * produto.quantidade)
-            ]
-        );
+            await client.query(
+                `INSERT INTO produtos_nfe (nfe_id, numero_item, codigo_produto, codigo_barras,
+                    descricao, ncm, quantidade, valor_unitario, valor_total, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+                [
+                    idNfeImportada, 1, 'MANUAL', produto.codigo_barras || null,
+                    produto.descricao, produto.ncm, produto.quantidade || 0,
+                    produto.valor_unitario || 0, (produto.valor_unitario || 0) * (produto.quantidade || 0)
+                ]
+            );
+        }
+
+        // 5. EXECUTAR PERSPECTIVA(S)
+        if (perspectiva === 'vendedor') {
+            await salvarNotaEProduto('emitente');
+        } else if (perspectiva === 'comprador') {
+            await salvarNotaEProduto('revendedor');
+        } else {
+            // Ambos: cria um de cada para indexar em todas as frentes de busca
+            await salvarNotaEProduto('emitente');
+            await salvarNotaEProduto('revendedor');
+        }
 
         await client.query('COMMIT');
         res.json({ sucesso: true, mensagem: 'Registro manual salvo com sucesso' });

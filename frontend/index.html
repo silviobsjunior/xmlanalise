@@ -126,6 +126,20 @@
                     </div>
                     
                     <form id="manualForm" style="display: flex; flex-direction: column; gap: 20px; margin-top: 20px;">
+                        <!-- PERSPECTIVA -->
+                        <div style="padding: 16px; border: 1px solid #3b82f6; border-radius: 12px; background: #eff6ff;">
+                            <label style="font-size: 14px; font-weight: 600; color: #1e40af; display: block; margin-bottom: 8px;">Onde estes produtos devem aparecer?</label>
+                            <select id="manPerspectiva" class="input-modern" style="width: 100%; border-color: #3b82f6;">
+                                <option value="vendedor">🛒 Aparecer no Vendedor (Emitente)</option>
+                                <option value="comprador">🏠 Aparecer no Comprador (Revendedor)</option>
+                                <option value="ambos">✨ Aparecer em Ambos (Visão completa)</option>
+                            </select>
+                            <p style="font-size: 11px; color: #3b82f6; margin-top: 6px;">
+                                Use <strong>Vendedor</strong> para listar o que você vende ou viu numa loja. 
+                                Use <strong>Comprador</strong> se você é um revendedor e quer mostrar seus preços.
+                            </p>
+                        </div>
+                        
                         <!-- SEÇÃO FORNECEDOR -->
                         <div style="padding: 16px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f9fafb;">
                             <h4 style="margin-bottom: 12px; color: #374151;">🏢 Dados do Vendedor/Fornecedor</h4>

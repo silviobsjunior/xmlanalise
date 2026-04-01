@@ -1195,7 +1195,8 @@ function setupManualForm() {
         quantidade: 0,
         valor_unitario: 0
       },
-      data_emissao: new Date().toISOString().split('T')[0]
+      data_emissao: new Date().toISOString().split('T')[0],
+      perspectiva: document.getElementById('manPerspectiva').value
     };
 
     try {

@@ -4,10 +4,11 @@ Este documento descreve a estrutura da planilha necessária para a importação 
 
 ## 📊 Estrutura da Planilha (Colunas Necessárias)
 
-Para que a busca pública funcione corretamente, os campos marcados com **(Obrigatório)** devem ser preenchidos.
+Para que a busca pública funcione corretamente, os campos marcados com **(Obrigatório)** devem ser preenchidos. Se a macro/planilha não possuir os valores de quantidade ou preço, o sistema adotará **zero (0)** automaticamente.
 
 | Coluna | Descrição | Obrigatório | Conteúdo XML (NF-e) |
 | :--- | :--- | :--- | :--- |
+| **perspectiva** | Papel no sistema (`vendedor`, `comprador` ou `ambos`) | Sim | Fixo ou Lógica de Negócio |
 | **vendedor_cnpj** | CNPJ do Vendedor (apenas números) | Sim | `/infNFe/emit/CNPJ` |
 | **vendedor_razao_social** | Razão Social do Vendedor | Sim | `/infNFe/emit/xNome` |
 | **vendedor_nome_fantasia** | Nome Fantasia do Vendedor | Não | `/infNFe/emit/xFant` |
@@ -25,19 +26,18 @@ Para que a busca pública funcione corretamente, os campos marcados com **(Obrig
 | **produto_unidade** | Unidade (UN, KG, LT, etc) | Não | `/infNFe/det/prod/uCom` |
 | **produto_quantidade** | Quantidade Comercial | Não (Zero) | `/infNFe/det/prod/qCom` |
 | **produto_valor_unitario** | Valor Unitário | Não (Zero) | `/infNFe/det/prod/vUnCom` |
-| **produto_valor_total** | Valor Total do Item | Não (Zero) | `/infNFe/det/prod/vProd` |
-| **data_emissao** | Data da Venda (AAAA-MM-DD) | Sim | `/infNFe/ide/dhEmi` ou `dEmi` |
+| **data_emissao** | Data da Venda (AAAA-MM-DD) | Não (Hoje) | `/infNFe/ide/dhEmi` ou `dEmi` |
 
-## 🛠️ Instruções para a Macro (Excel/VBA ou Google Apps Script)
+## 🛡️ Regras de Validação para a Macro
 
-Ao criar a macro para importar XMLs offline, siga estas diretrizes:
+A macro de importação deve garantir que:
 
-1.  **Loop nos Itens**: Cada arquivo XML de NF-e possui um ou mais itens no caminho `/infNFe/det`. A macro deve percorrer todos os itens.
-2.  **Dados do Vendedor**: Os dados do emitente (`/infNFe/emit`) são os mesmos para todos os itens daquela nota.
-3.  **GTIN/EAN**: Se o campo `cEAN` contiver "SEM GTIN", deixe a coluna `produto_cean` vazia ou com valor nulo.
-4.  **Campos Numéricos**: Se não conseguir extrair valores de quantidade ou preço, insira `0`.
-5.  **Datas**: Converta a data de emissão para o formato padrão `AAAA-MM-DD` (ISO 8601).
-6.  **Limpeza**: Remova caracteres especiais de CNPJ e CEP (mantenha apenas números).
+1.  **Colunas Mínimas**: Mesmo que o usuário remova colunas opcionais, a macro deve validar se as colunas **Sim** na tabela acima permanecem presentes.
+2.  **Valores Padrão**: Se as colunas de `quantidade` ou `valor` forem removidas pelo usuário, a macro deve inserir `0` nestas colunas internamente antes do upload.
+3.  **Perspectiva**: Se o usuário não definir, o padrão deve ser `vendedor`.
+    *   `vendedor`: Vincula o produto ao emitente.
+    *   `comprador`: Vincula o produto ao destinatário (útil para registrar que "eu comprei de X" e aparecer como revendedor).
+    *   `ambos`: Registra as duas visões.
 
 ---
 *Documento gerado automaticamente para suporte à integração offline.*
