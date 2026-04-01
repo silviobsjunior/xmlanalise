@@ -29,6 +29,10 @@
                     <span class="nav-icon">📤</span>
                     <span class="nav-label">Upload XML</span>
                 </div>
+                <div class="nav-item" data-tab="manual">
+                    <span class="nav-icon">📝</span>
+                    <span class="nav-label">Incluir Manual</span>
+                </div>
                 <div class="nav-item" data-tab="arquivos">
                     <span class="nav-icon">📁</span>
                     <span class="nav-label">Meus Arquivos</span>
@@ -110,6 +114,71 @@
                         <p>Digite um produto acima para buscar vendedores.</p>
                     </div>
                     <div id="buscaResultados"></div>
+                </div>
+            </div>
+
+            <!-- Manual Entry Tab -->
+            <div id="manualTab" class="tab-content" style="display: none;">
+                <div class="card-modern">
+                    <div class="card-header">
+                        <h3>📝 Incluir Produto / Fornecedor Manualmente</h3>
+                        <a href="IMPORTACAO_PLANILHA.md" target="_blank" class="btn btn-outline" style="font-size: 12px;">📄 Ver Modelo de Planilha</a>
+                    </div>
+                    
+                    <form id="manualForm" style="display: flex; flex-direction: column; gap: 20px; margin-top: 20px;">
+                        <!-- SEÇÃO FORNECEDOR -->
+                        <div style="padding: 16px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f9fafb;">
+                            <h4 style="margin-bottom: 12px; color: #374151;">🏢 Dados do Vendedor/Fornecedor</h4>
+                            <div class="grid-form" style="display: grid; grid-template-columns: 1fr 2fr; gap: 12px;">
+                                <input type="text" id="manVendCnpj" placeholder="CNPJ (apenas números)*" class="input-modern" required>
+                                <input type="text" id="manVendRazao" placeholder="Razão Social*" class="input-modern" required>
+                                <input type="text" id="manVendFantasia" placeholder="Nome Fantasia" class="input-modern">
+                                <input type="text" id="manVendFone" placeholder="Telefone" class="input-modern">
+                            </div>
+                            <div class="grid-form" style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-top: 12px;">
+                                <input type="text" id="manVendLogr" placeholder="Logradouro (Rua, Av)*" class="input-modern" required>
+                                <input type="text" id="manVendNum" placeholder="Nº*" class="input-modern" required>
+                                <input type="text" id="manVendCompl" placeholder="Complemento" class="input-modern">
+                            </div>
+                            <div class="grid-form" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-top: 12px;">
+                                <input type="text" id="manVendBairro" placeholder="Bairro*" class="input-modern" required>
+                                <input type="text" id="manVendCidade" placeholder="Cidade*" class="input-modern" required>
+                                <input type="text" id="manVendUf" placeholder="UF*" class="input-modern" maxlength="2" required>
+                                <input type="text" id="manVendCep" placeholder="CEP*" class="input-modern" required>
+                            </div>
+                        </div>
+
+                        <!-- SEÇÃO PRODUTO -->
+                        <div style="padding: 16px; border: 1px solid #e5e7eb; border-radius: 12px; background: #f9fafb;">
+                            <h4 style="margin-bottom: 12px; color: #374151;">📦 Dados do Produto</h4>
+                            <div class="grid-form" style="display: grid; grid-template-columns: 1fr 3fr; gap: 12px;">
+                                <input type="text" id="manProdCean" placeholder="Código de Barras (EAN)" class="input-modern">
+                                <input type="text" id="manProdDesc" placeholder="Descrição do Produto*" class="input-modern" required>
+                            </div>
+                            <div class="grid-form" style="display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px;">
+                                <input type="text" id="manProdNcm" placeholder="NCM (8 dígitos)*" class="input-modern" required>
+                                <p style="font-size: 11px; color: #6b7280;">Os campos de quantidade e valor serão registrados como zero.</p>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 10px;">
+                            <button type="reset" class="btn btn-outline">Limpar</button>
+                            <button type="submit" id="manSubmitBtn" class="btn btn-primary">💾 Salvar Registro</button>
+                        </div>
+                    </form>
+
+                    <hr style="margin: 30px 0; border: 0; border-top: 1px solid #e5e7eb;">
+
+                    <!-- Opção Planilha -->
+                    <div style="text-align: center; padding: 20px; background: #eff6ff; border-radius: 12px; border: 1px dashed #3b82f6;">
+                        <h4 style="color: #1e40af; margin-bottom: 8px;">🚀 Importação em Lote via Planilha</h4>
+                        <p style="font-size: 14px; color: #1e3a8a; margin-bottom: 16px;">
+                            Em breve você poderá fazer o upload de uma planilha (CSV/XLSX) seguindo o modelo padrão.
+                        </p>
+                        <button class="btn btn-primary" disabled style="opacity: 0.6; cursor: not-allowed;">
+                            📤 Upload Planilha (Em Breve)
+                        </button>
+                    </div>
                 </div>
             </div>
 

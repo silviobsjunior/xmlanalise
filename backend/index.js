@@ -1567,6 +1567,254 @@ app.post('/api/processar-xml', upload.single('xml'), async (req, res) => {
 });
 
 // =============================================
+// ENDPOINT PARA INCLUSÃO MANUAL (PRODUTO/FORNECEDOR)
+// =============================================
+app.post('/api/incluir-manual', async (req, res) => {
+    console.log(`\n${getTimestamp()} 📝 INCLUSÃO MANUAL`);
+    const client = await pool.connect();
+    const userInfo = req.userInfo;
+
+    try {
+        const { vendedor, produto, data_emissao } = req.body;
+
+        if (!vendedor || !produto) {
+            return res.status(400).json({ sucesso: false, erro: 'Dados de vendedor e produto são obrigatórios' });
+        }
+
+        await client.query('BEGIN');
+
+        // 1. INSERIR/OBTER EMITENTE (Vendedor)
+        let idEmitenteInt = null;
+        const emitenteExistente = await client.query(
+            `SELECT id FROM emitentes WHERE cnpj = $1`, [vendedor.cnpj]
+        );
+
+        if (emitenteExistente.rows.length > 0) {
+            idEmitenteInt = emitenteExistente.rows[0].id;
+            // Atualizar dados se necessário
+            await client.query(
+                `UPDATE emitentes SET 
+                    razao_social = $1, nome_fantasia = $2, telefone = $3,
+                    logradouro = $4, numero = $5, complemento = $6,
+                    bairro = $7, municipio = $8, uf = $9, cep = $10,
+                    atualizado_em = NOW()
+                 WHERE id = $11`,
+                [
+                    vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
+                    vendedor.logradouro, vendedor.numero, vendedor.complemento,
+                    vendedor.bairro, vendedor.municipio, vendedor.uf, vendedor.cep,
+                    idEmitenteInt
+                ]
+            );
+        } else {
+            const result = await client.query(
+                `INSERT INTO emitentes (
+                    cnpj, razao_social, nome_fantasia, telefone,
+                    logradouro, numero, complemento, bairro, municipio, uf, cep,
+                    criado_em, atualizado_em
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+                RETURNING id`,
+                [
+                    vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
+                    vendedor.logradouro, vendedor.numero, vendedor.complemento,
+                    vendedor.bairro, vendedor.municipio, vendedor.uf, vendedor.cep
+                ]
+            );
+            idEmitenteInt = result.rows[0].id;
+        }
+
+        // 2. INSERIR/OBTER ATORES
+        let emitenteUUID = null;
+        const atorExistente = await client.query(
+            `SELECT id FROM atores WHERE identificador = $1`, [vendedor.cnpj]
+        );
+
+        if (atorExistente.rows.length > 0) {
+            emitenteUUID = atorExistente.rows[0].id;
+        } else {
+            const result = await client.query(
+                `INSERT INTO atores (
+                    tipo_identificador, identificador, razao_social, 
+                    nome_fantasia, tipo_pessoa, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                RETURNING id`,
+                ['CNPJ', vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, 'JURIDICA']
+            );
+            emitenteUUID = result.rows[0].id;
+        }
+
+        // 3. CRIAR NOTA FISCAL MANUAL (DUMMY)
+        const manualChave = `MANUAL-${crypto.randomUUID()}`;
+        const manualData = data_emissao || new Date().toISOString();
+        
+        // Ator consumidor padrão para nota manual
+        let destinatarioUUID = null;
+        const atorConsumidor = await client.query(`SELECT id FROM atores WHERE identificador = 'CONSUMIDOR_FINAL' LIMIT 1`);
+        if (atorConsumidor.rows.length > 0) {
+            destinatarioUUID = atorConsumidor.rows[0].id;
+        } else {
+            const result = await client.query(
+                `INSERT INTO atores (tipo_identificador, identificador, razao_social, nome_fantasia, tipo_pessoa, created_at, updated_at)
+                 VALUES ('OUT', 'CONSUMIDOR_FINAL', 'Consumidor Final Não Identificado', 'Consumidor Final', 'FISICA', NOW(), NOW())
+                 RETURNING id`
+            );
+            destinatarioUUID = result.rows[0].id;
+        }
+
+        const usuarioId = userInfo.type === 'user' ? userInfo.id : null;
+        const sessaoAnonimaId = userInfo.type === 'anonymous' ? userInfo.id : null;
+
+        await client.query(
+            `INSERT INTO notas_fiscais (
+                chave_acesso, numero, serie, data_emissao, status,
+                emitente_id, destinatario_id, usuario_id, sessao_anonima_id,
+                perspectiva_importador, valor_total_nota, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+            [
+                manualChave, 0, 0, manualData, 'MANUAL',
+                emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId,
+                'emitente', (produto.valor_unitario * produto.quantidade),
+            ]
+        );
+
+        // 4. INSERIR EM NFE_IMPORTADAS
+        const resultImport = await client.query(
+            `INSERT INTO nfe_importadas (chave_acesso, numero, serie, data_emissao, created_at)
+             VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
+            [manualChave, 0, 0, manualData]
+        );
+        const idNfeImportada = resultImport.rows[0].id;
+
+        // 5. INSERIR PRODUTO
+        await client.query(
+            `INSERT INTO produtos_nfe (nfe_id, numero_item, codigo_produto, codigo_barras,
+                descricao, ncm, quantidade, valor_unitario, valor_total, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+            [
+                idNfeImportada, 1, 'MANUAL', produto.codigo_barras || null,
+                produto.descricao, produto.ncm, produto.quantidade,
+                produto.valor_unitario, (produto.valor_unitario * produto.quantidade)
+            ]
+        );
+
+        await client.query('COMMIT');
+        res.json({ sucesso: true, mensagem: 'Registro manual salvo com sucesso' });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(`${getTimestamp()} ❌ Erro na inclusão manual:`, error);
+        res.status(500).json({ sucesso: false, erro: 'Erro interno ao salvar registro manual', detalhes: error.message });
+    } finally {
+        client.release();
+    }
+});
+
+// =============================================
+// ENDPOINT PARA BUSCAR FORNECEDOR POR CNPJ
+// =============================================
+app.get('/api/fornecedor/:cnpj', async (req, res) => {
+    try {
+        const { cnpj } = req.params;
+        const query = `
+            SELECT cnpj, razao_social, nome_fantasia, telefone,
+                   logradouro, numero, complemento, bairro, municipio, uf, cep
+            FROM emitentes WHERE cnpj = $1 LIMIT 1
+        `;
+        const { rows } = await pool.query(query, [cnpj]);
+        
+        if (rows.length > 0) {
+            res.json({ sucesso: true, fornecedor: rows[0] });
+        } else {
+            res.json({ sucesso: false, erro: 'Fornecedor não encontrado' });
+        }
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro ao buscar fornecedor:`, error);
+        res.status(500).json({ sucesso: false, erro: 'Erro interno' });
+    }
+});
+
+// =============================================
+// ENDPOINT PARA BUSCAR PRODUTO POR EAN (AUTO-RECUPERAÇÃO)
+// =============================================
+app.get('/api/produto/ean/:ean', async (req, res) => {
+    try {
+        const { ean } = req.params;
+        const query = `
+            SELECT descricao, ncm
+            FROM produtos_nfe
+            WHERE codigo_barras = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+        `;
+        const { rows } = await pool.query(query, [ean]);
+        
+        if (rows.length > 0) {
+            res.json({ sucesso: true, produto: rows[0] });
+        } else {
+            res.json({ sucesso: false, erro: 'Produto não encontrado na base local' });
+        }
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro ao buscar produto por EAN:`, error);
+        res.status(500).json({ sucesso: false, erro: 'Erro interno' });
+    }
+});
+
+// =============================================
+// ENDPOINT PARA BUSCA EXTERNA DE CNPJ (CNPJ.WS)
+// =============================================
+app.get('/api/cnpj-externo/:cnpj', async (req, res) => {
+    const cnpj = req.params.cnpj.replace(/\D/g, '');
+    if (cnpj.length !== 14) {
+        return res.status(400).json({ sucesso: false, erro: 'CNPJ inválido' });
+    }
+
+    console.log(`${getTimestamp()} 🌐 Buscando CNPJ externo: ${cnpj}`);
+    
+    const https = require('https');
+    const url = `https://publica.cnpj.ws/cnpj/${cnpj}`;
+
+    https.get(url, (apiRes) => {
+        let data = '';
+        apiRes.on('data', (chunk) => { data += chunk; });
+        apiRes.on('end', () => {
+            try {
+                if (apiRes.statusCode !== 200) {
+                    return res.status(apiRes.statusCode).json({ 
+                        sucesso: false, 
+                        erro: 'CNPJ não encontrado ou erro na API externa' 
+                    });
+                }
+
+                const json = JSON.parse(data);
+                const estab = json.estabelecimento || {};
+                
+                // Mapeamento para o formato do nosso banco
+                const fornecedor = {
+                    cnpj: json.cnpj_raiz + estab.cnpj_ordem + estab.cnpj_dv,
+                    razao_social: json.razao_social,
+                    nome_fantasia: estab.nome_fantasia || json.razao_social,
+                    telefone: estab.ddd1 && estab.telefone1 ? `(${estab.ddd1}) ${estab.telefone1}` : null,
+                    logradouro: estab.logradouro,
+                    numero: estab.numero,
+                    complemento: estab.complemento,
+                    bairro: estab.bairro,
+                    municipio: estab.cidade?.nome,
+                    uf: estab.estado?.sigla,
+                    cep: estab.cep
+                };
+
+                res.json({ sucesso: true, fornecedor });
+            } catch (e) {
+                res.status(500).json({ sucesso: false, erro: 'Erro ao processar dados da API externa' });
+            }
+        });
+    }).on('error', (err) => {
+        console.error('Erro consulta CNPJ externo:', err.message);
+        res.status(500).json({ sucesso: false, erro: 'Erro na conexão com API externa' });
+    });
+});
+
+// =============================================
 // ENDPOINT PARA MIGRAR DADOS ANÔNIMOS
 // =============================================
 app.post('/api/migrar-dados-anonimos', async (req, res) => {

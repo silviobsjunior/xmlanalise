@@ -1085,6 +1085,8 @@ function setupEventListeners() {
     });
   });
 
+  setupManualForm();
+
   document.getElementById('searchInput')?.addEventListener('input', debounce((e) => loadNotas(e.target.value, 1), 300));
   
   // Inicializa autenticação para verificar se retornou do login social
@@ -1092,6 +1094,140 @@ function setupEventListeners() {
 
   // Carrega estatísticas gerais do dashboard ao iniciar
   carregarEstatisticasGerais();
+}
+
+// ============================================================
+// INCLUSÃO MANUAL
+// ============================================================
+function setupManualForm() {
+  const form = document.getElementById('manualForm');
+  if (!form) return;
+
+  // Auto-preenchimento por CNPJ
+  const cnpjInput = document.getElementById('manVendCnpj');
+  cnpjInput?.addEventListener('blur', async () => {
+    const cnpj = cnpjInput.value.replace(/\D/g, '');
+    if (cnpj.length === 14) {
+      try {
+        const res = await fetch(`${API}/api/fornecedor/${cnpj}`);
+        const data = await res.json();
+        if (data.sucesso && data.fornecedor) {
+          preencherDadosFornecedor(data.fornecedor);
+          showToast('🏢 Dados do fornecedor carregados (Base Local)', 'success');
+        } else {
+          // Fallback para busca externa
+          showToast('🌐 Buscando CNPJ em base externa...', 'info');
+          const resExt = await fetch(`${API}/api/cnpj-externo/${cnpj}`);
+          const dataExt = await resExt.json();
+          if (dataExt.sucesso && dataExt.fornecedor) {
+            preencherDadosFornecedor(dataExt.fornecedor);
+            showToast('🌐 Dados do fornecedor carregados (Base Externa)', 'success');
+          } else {
+            showToast('⚠️ CNPJ não encontrado nas bases', 'warning');
+          }
+        }
+      } catch (e) {
+        console.warn('Erro ao buscar fornecedor:', e);
+      }
+    }
+  });
+
+  // Auto-recuperação de produto por EAN
+  const eanInput = document.getElementById('manProdCean');
+  eanInput?.addEventListener('blur', async () => {
+    const ean = eanInput.value.trim();
+    if (ean.length >= 8) {
+      try {
+        const res = await fetch(`${API}/api/produto/ean/${ean}`);
+        const data = await res.json();
+        if (data.sucesso && data.produto) {
+          document.getElementById('manProdDesc').value = data.produto.descricao || '';
+          document.getElementById('manProdNcm').value = data.produto.ncm || '';
+          showToast('📦 Produto recuperado da base', 'success');
+        }
+      } catch (e) {
+        console.warn('Erro ao recuperar produto:', e);
+      }
+    }
+  });
+
+  function preencherDadosFornecedor(v) {
+    document.getElementById('manVendRazao').value = v.razao_social || '';
+    document.getElementById('manVendFantasia').value = v.nome_fantasia || '';
+    document.getElementById('manVendFone').value = v.telefone || '';
+    document.getElementById('manVendLogr').value = v.logradouro || '';
+    document.getElementById('manVendNum').value = v.numero || '';
+    document.getElementById('manVendCompl').value = v.complemento || '';
+    document.getElementById('manVendBairro').value = v.bairro || '';
+    document.getElementById('manVendCidade').value = v.municipio || '';
+    document.getElementById('manVendUf').value = v.uf || '';
+    document.getElementById('manVendCep').value = v.cep || '';
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const submitBtn = document.getElementById('manSubmitBtn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '⏳ Salvando...';
+    }
+
+    const data = {
+      vendedor: {
+        cnpj: document.getElementById('manVendCnpj').value.replace(/\D/g, ''),
+        razao_social: document.getElementById('manVendRazao').value,
+        nome_fantasia: document.getElementById('manVendFantasia').value,
+        telefone: document.getElementById('manVendFone').value,
+        logradouro: document.getElementById('manVendLogr').value,
+        numero: document.getElementById('manVendNum').value,
+        complemento: document.getElementById('manVendCompl').value,
+        bairro: document.getElementById('manVendBairro').value,
+        municipio: document.getElementById('manVendCidade').value,
+        uf: document.getElementById('manVendUf').value.toUpperCase(),
+        cep: document.getElementById('manVendCep').value.replace(/\D/g, '')
+      },
+      produto: {
+        codigo_barras: document.getElementById('manProdCean').value,
+        descricao: document.getElementById('manProdDesc').value,
+        ncm: document.getElementById('manProdNcm').value.replace(/\D/g, ''),
+        unidade: 'UN',
+        quantidade: 0,
+        valor_unitario: 0
+      },
+      data_emissao: new Date().toISOString().split('T')[0]
+    };
+
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+      
+      const response = await fetch(`${API}/api/incluir-manual`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data)
+      });
+
+      const result = await response.json();
+
+      if (result.sucesso) {
+        showToast('✅ Registro salvo com sucesso!', 'success');
+        form.reset();
+        await carregarFiltros();
+        await carregarEstatisticasGerais();
+      } else {
+        showToast('❌ Erro: ' + (result.erro || 'Falha ao salvar'), 'error');
+      }
+    } catch (err) {
+      console.error('Erro submissão manual:', err);
+      showToast('❌ Erro de conexão com o servidor', 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '💾 Salvar Registro';
+      }
+    }
+  });
 }
 
 function showToast(message, type = 'info') {
