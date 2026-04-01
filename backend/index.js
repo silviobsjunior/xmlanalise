@@ -1762,7 +1762,7 @@ app.get('/api/produto/ean/:ean', async (req, res) => {
 });
 
 // =============================================
-// ENDPOINT PARA BUSCA EXTERNA DE CNPJ (CNPJ.WS)
+// ENDPOINT PARA BUSCA EXTERNA DE CNPJ (COM FALLBACK)
 // =============================================
 app.get('/api/cnpj-externo/:cnpj', async (req, res) => {
     const cnpj = req.params.cnpj.replace(/\D/g, '');
@@ -1771,49 +1771,81 @@ app.get('/api/cnpj-externo/:cnpj', async (req, res) => {
     }
 
     console.log(`${getTimestamp()} 🌐 Buscando CNPJ externo: ${cnpj}`);
-    
     const https = require('https');
-    const url = `https://publica.cnpj.ws/cnpj/${cnpj}`;
 
-    https.get(url, (apiRes) => {
-        let data = '';
-        apiRes.on('data', (chunk) => { data += chunk; });
-        apiRes.on('end', () => {
-            try {
-                if (apiRes.statusCode !== 200) {
-                    return res.status(apiRes.statusCode).json({ 
-                        sucesso: false, 
-                        erro: 'CNPJ não encontrado ou erro na API externa' 
-                    });
-                }
-
-                const json = JSON.parse(data);
-                const estab = json.estabelecimento || {};
-                
-                // Mapeamento para o formato do nosso banco
-                const fornecedor = {
-                    cnpj: json.cnpj_raiz + estab.cnpj_ordem + estab.cnpj_dv,
-                    razao_social: json.razao_social,
-                    nome_fantasia: estab.nome_fantasia || json.razao_social,
-                    telefone: estab.ddd1 && estab.telefone1 ? `(${estab.ddd1}) ${estab.telefone1}` : null,
-                    logradouro: estab.logradouro,
-                    numero: estab.numero,
-                    complemento: estab.complemento,
-                    bairro: estab.bairro,
-                    municipio: estab.cidade?.nome,
-                    uf: estab.estado?.sigla,
-                    cep: estab.cep
-                };
-
-                res.json({ sucesso: true, fornecedor });
-            } catch (e) {
-                res.status(500).json({ sucesso: false, erro: 'Erro ao processar dados da API externa' });
-            }
+    // Função auxiliar para consulta HTTPS
+    function fetchUrl(url) {
+        return new Promise((resolve, reject) => {
+            https.get(url, (apiRes) => {
+                let data = '';
+                apiRes.on('data', (chunk) => { data += chunk; });
+                apiRes.on('end', () => resolve({ status: apiRes.statusCode, data }));
+            }).on('error', (err) => reject(err));
         });
-    }).on('error', (err) => {
-        console.error('Erro consulta CNPJ externo:', err.message);
-        res.status(500).json({ sucesso: false, erro: 'Erro na conexão com API externa' });
-    });
+    }
+
+    try {
+        // TENTATIVA 1: CNPJ.WS (Mais estável e sem limites rígidos no free)
+        console.log(`${getTimestamp()} 📡 Tentando CNPJ.ws...`);
+        try {
+            const resWs = await fetchUrl(`https://publica.cnpj.ws/cnpj/${cnpj}`);
+            if (resWs.status === 200) {
+                const json = JSON.parse(resWs.data);
+                const estab = json.estabelecimento || {};
+                return res.json({
+                    sucesso: true,
+                    fonte: 'cnpj.ws',
+                    fornecedor: {
+                        cnpj: json.cnpj_raiz + (estab.cnpj_ordem || '') + (estab.cnpj_dv || ''),
+                        razao_social: json.razao_social,
+                        nome_fantasia: estab.nome_fantasia || json.razao_social,
+                        telefone: estab.ddd1 && estab.telefone1 ? `(${estab.ddd1}) ${estab.telefone1}` : null,
+                        logradouro: estab.logradouro,
+                        numero: estab.numero,
+                        complemento: estab.complemento,
+                        bairro: estab.bairro,
+                        municipio: estab.cidade?.nome,
+                        uf: estab.estado?.sigla,
+                        cep: estab.cep
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn(`${getTimestamp()} ⚠️ CNPJ.ws falhou, tentando backup...`);
+        }
+
+        // TENTATIVA 2: ReceitaWS (Backup)
+        console.log(`${getTimestamp()} 📡 Tentando ReceitaWS (Backup)...`);
+        const resRws = await fetchUrl(`https://receitaws.com.br/v1/cnpj/${cnpj}`);
+        if (resRws.status === 200) {
+            const json = JSON.parse(resRws.data);
+            if (json.status !== 'ERROR') {
+                return res.json({
+                    sucesso: true,
+                    fonte: 'receitaws',
+                    fornecedor: {
+                        cnpj: json.cnpj.replace(/\D/g, ''),
+                        razao_social: json.nome,
+                        nome_fantasia: json.fantasia || json.nome,
+                        telefone: json.telefone,
+                        logradouro: json.logradouro,
+                        numero: json.numero,
+                        complemento: json.complemento,
+                        bairro: json.bairro,
+                        municipio: json.municipio,
+                        uf: json.uf,
+                        cep: json.cep.replace(/\D/g, '')
+                    }
+                });
+            }
+        }
+
+        res.status(404).json({ sucesso: false, erro: 'CNPJ não encontrado em nenhuma fonte externa' });
+
+    } catch (error) {
+        console.error(`${getTimestamp()} ❌ Erro crítico na consulta de CNPJ:`, error.message);
+        res.status(500).json({ sucesso: false, erro: 'Erro interno na busca externa' });
+    }
 });
 
 // =============================================
