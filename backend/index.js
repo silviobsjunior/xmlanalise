@@ -1595,13 +1595,13 @@ app.post('/api/incluir-manual', async (req, res) => {
                 `UPDATE emitentes SET 
                     razao_social = $1, nome_fantasia = $2, telefone = $3,
                     logradouro = $4, numero = $5, complemento = $6,
-                    bairro = $7, municipio = $8, uf = $9, cep = $10,
+                    bairro = $7, municipio = $8, codigo_municipio = $9, uf = $10, cep = $11,
                     atualizado_em = NOW()
-                 WHERE id = $11`,
+                 WHERE id = $12`,
                 [
                     vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
                     vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, vendedor.uf, vendedor.cep,
+                    vendedor.bairro, vendedor.municipio, vendedor.codigo_municipio, vendedor.uf, vendedor.cep,
                     idEmitenteInt
                 ]
             );
@@ -1609,14 +1609,14 @@ app.post('/api/incluir-manual', async (req, res) => {
             const result = await client.query(
                 `INSERT INTO emitentes (
                     cnpj, razao_social, nome_fantasia, telefone,
-                    logradouro, numero, complemento, bairro, municipio, uf, cep,
+                    logradouro, numero, complemento, bairro, municipio, codigo_municipio, uf, cep,
                     criado_em, atualizado_em
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
                 RETURNING id`,
                 [
                     vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
                     vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, vendedor.uf, vendedor.cep
+                    vendedor.bairro, vendedor.municipio, vendedor.codigo_municipio, vendedor.uf, vendedor.cep
                 ]
             );
             idEmitenteInt = result.rows[0].id;

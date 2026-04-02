@@ -1086,6 +1086,7 @@ function setupEventListeners() {
   });
 
   setupManualForm();
+  setupSpreadsheetImport();
 
   document.getElementById('searchInput')?.addEventListener('input', debounce((e) => loadNotas(e.target.value, 1), 300));
   
@@ -1160,6 +1161,7 @@ function setupManualForm() {
     document.getElementById('manVendCompl').value = v.complemento || '';
     document.getElementById('manVendBairro').value = v.bairro || '';
     document.getElementById('manVendCidade').value = v.municipio || '';
+    document.getElementById('manVendIbge').value = v.codigo_municipio || '';
     document.getElementById('manVendUf').value = v.uf || '';
     document.getElementById('manVendCep').value = v.cep || '';
   }
@@ -1184,6 +1186,7 @@ function setupManualForm() {
         complemento: document.getElementById('manVendCompl').value,
         bairro: document.getElementById('manVendBairro').value,
         municipio: document.getElementById('manVendCidade').value,
+        codigo_municipio: document.getElementById('manVendIbge').value.replace(/\D/g, ''),
         uf: document.getElementById('manVendUf').value.toUpperCase(),
         cep: document.getElementById('manVendCep').value.replace(/\D/g, '')
       },
@@ -1271,3 +1274,126 @@ window.setNcmFilter = (ncm) => {
     }
   }
 };
+
+// ============================================================
+// IMPORTAÇÃO DE PLANILHA
+// ============================================================
+function setupSpreadsheetImport() {
+  const btn = document.getElementById('uploadSpreadsheetBtn');
+  const input = document.getElementById('spreadsheetInput');
+  if (!btn || !input) return;
+
+  btn.addEventListener('click', () => input.click());
+
+  input.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet);
+
+        if (json.length === 0) {
+          showToast('⚠️ Planilha vazia', 'warning');
+          return;
+        }
+
+        if (confirm(`Deseja importar ${json.length} registros da planilha?`)) {
+          await processarLotePlanilha(json);
+        }
+      } catch (err) {
+        console.error('Erro ao ler planilha:', err);
+        showToast('❌ Erro ao ler planilha', 'error');
+      } finally {
+        input.value = ''; // Limpa para permitir novo upload do mesmo arquivo
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function processarLotePlanilha(rows) {
+  showToast(`⏳ Iniciando importação de ${rows.length} registros...`, 'info');
+  
+  let sucessos = 0;
+  let erros = 0;
+
+  for (const row of rows) {
+    // Mapeamento baseado no IMPORTACAO_PLANILHA.md
+    
+    // Tratamento de Data (Excel serial ou string)
+    let dataEmi = row.data_emissao;
+    if (typeof dataEmi === 'number') {
+      // Converte data serial do Excel (dias desde 1900-01-01)
+      const date = new Date(Math.round((dataEmi - 25569) * 86400 * 1000));
+      dataEmi = date.toISOString().split('T')[0];
+    } else if (!dataEmi) {
+      dataEmi = new Date().toISOString().split('T')[0];
+    }
+
+    // Tratamento de NCM (Garantir 8 dígitos)
+    let ncmStr = String(row.produto_ncm || '').replace(/\D/g, '');
+    if (ncmStr && ncmStr.length < 8) {
+      ncmStr = ncmStr.padStart(8, '0');
+    }
+
+    const payload = {
+      vendedor: {
+        cnpj: String(row.vendedor_cnpj || '').replace(/\D/g, ''),
+        razao_social: String(row.vendedor_razao_social || '').trim(),
+        nome_fantasia: String(row.vendedor_nome_fantasia || '').trim(),
+        telefone: String(row.vendedor_telefone || '').trim(),
+        logradouro: String(row.vendedor_logradouro || '').trim(),
+        numero: String(row.vendedor_numero || '').trim(),
+        complemento: String(row.vendedor_complemento || '').trim(),
+        bairro: String(row.vendedor_bairro || '').trim(),
+        municipio: String(row.vendedor_cidade || '').trim(),
+        codigo_municipio: String(row.vendedor_cidade_ibge || '').replace(/\D/g, ''),
+        uf: String(row.vendedor_uf || '').toUpperCase().trim(),
+        cep: String(row.vendedor_cep || '').replace(/\D/g, '')
+      },
+      produto: {
+        codigo_barras: String(row.produto_cean || '').trim(),
+        descricao: String(row.produto_descricao || '').trim(),
+        ncm: ncmStr,
+        unidade: String(row.produto_unidade || 'UN').trim(),
+        quantidade: parseFloat(row.produto_quantidade) || 0,
+        valor_unitario: parseFloat(row.produto_valor_unitario) || 0
+      },
+      data_emissao: dataEmi,
+      perspectiva: String(row.perspectiva || 'vendedor').toLowerCase().trim()
+    };
+
+    // Validação mínima: CNPJ, Razão Social, Logradouro, Bairro, Cidade, UF, CEP e Descrição do Produto
+    if (!payload.vendedor.cnpj || !payload.vendedor.razao_social || !payload.produto.descricao) {
+      erros++;
+      continue;
+    }
+
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+      
+      const res = await fetch(`${API}/api/incluir-manual`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+      const result = await res.json();
+      if (result.sucesso) sucessos++; else erros++;
+    } catch (err) {
+      erros++;
+    }
+  }
+
+  showToast(`✅ Importação concluída: ${sucessos} sucessos, ${erros} erros`, sucessos > 0 ? 'success' : 'error');
+  if (sucessos > 0) {
+    await carregarFiltros();
+    await carregarEstatisticasGerais();
+  }
+}
