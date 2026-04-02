@@ -1592,7 +1592,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                     `SELECT m.codigo_ibge 
                      FROM municipios m
                      JOIN ufs u ON m.codigo_uf = u.codigo_uf
-                     WHERE (UPPER(m.nome) = UPPER($1) OR UPPER(m.nome_sem_acento) = UPPER($1))
+                     WHERE UPPER(m.nome) = UPPER($1)
                        AND u.sigla = UPPER($2)
                      LIMIT 1`,
                     [vendedor.municipio, vendedor.uf]
@@ -1624,7 +1624,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                 [
                     vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
                     vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal || null, vendedor.uf, vendedor.cep,
+                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal, vendedor.uf, vendedor.cep,
                     idEmitenteInt
                 ]
             );
@@ -1639,7 +1639,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                 [
                     vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
                     vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal || null, vendedor.uf, vendedor.cep
+                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal, vendedor.uf, vendedor.cep
                 ]
             );
             idEmitenteInt = result.rows[0].id;
@@ -1657,10 +1657,10 @@ app.post('/api/incluir-manual', async (req, res) => {
             const result = await client.query(
                 `INSERT INTO atores (
                     tipo_identificador, identificador, razao_social, 
-                    nome_fantasia, tipo_pessoa, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                    nome_fantasia, inscricao_estadual, inscricao_municipal, tipo_pessoa, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
                 RETURNING id`,
-                ['CNPJ', vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, 'JURIDICA']
+                ['CNPJ', vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, null, null, 'JURIDICA']
             );
             emitenteUUID = result.rows[0].id;
         }
@@ -1670,7 +1670,19 @@ app.post('/api/incluir-manual', async (req, res) => {
         const atorConsumidor = await client.query(`SELECT id FROM atores WHERE identificador = 'CONSUMIDOR_FINAL' LIMIT 1`);
         destinatarioUUID = atorConsumidor.rows[0].id;
 
-        const manualData = data_emissao || new Date().toISOString();
+        // Tratar data de emissão manual
+        let manualData = data_emissao;
+        if (!manualData) {
+            manualData = new Date().toISOString();
+        } else if (!manualData.includes('T')) {
+            // Se vier apenas YYYY-MM-DD, tenta converter para ISO full
+            try {
+                manualData = new Date(manualData).toISOString();
+            } catch (e) {
+                manualData = new Date().toISOString();
+            }
+        }
+
         const usuarioId = userInfo.type === 'user' ? userInfo.id : null;
         const sessaoAnonimaId = userInfo.type === 'anonymous' ? userInfo.id : null;
 
@@ -1686,14 +1698,14 @@ app.post('/api/incluir-manual', async (req, res) => {
             await client.query(
                 `INSERT INTO notas_fiscais (
                     chave_acesso, numero, serie, data_emissao, status,
-                    tipo_operacao, finalidade, consumidor_final, presenca_comprador,
+                    natureza_operacao, tipo_operacao, finalidade, consumidor_final, presenca_comprador,
                     processo_emissao, versao_processo,
                     emitente_id, destinatario_id, usuario_id, sessao_anonima_id,
                     perspectiva_importador, valor_total_nota, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())`,
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())`,
                 [
                     manualChave, 0, 0, manualData, 'MANUAL',
-                    1, 1, true, 0, 1, '4.00', // Defaults para campos obrigatórios
+                    'INCLUSÃO MANUAL', 1, 1, true, 0, 1, '4.00', // Defaults para campos obrigatórios
                     emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId,
                     pImportador, vTotal,
                 ]
@@ -1709,11 +1721,11 @@ app.post('/api/incluir-manual', async (req, res) => {
 
             await client.query(
                 `INSERT INTO produtos_nfe (nfe_id, numero_item, codigo_produto, codigo_barras,
-                    descricao, ncm, quantidade, valor_unitario, valor_total, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+                    descricao, ncm, cfop, quantidade, valor_unitario, valor_total, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
                 [
                     idNfeImportada, 1, 'MANUAL', produto.codigo_barras || null,
-                    produto.descricao, produto.ncm || null, qtd, vUnit, vTotal
+                    produto.descricao, produto.ncm || null, '0000', qtd, vUnit, vTotal
                 ]
             );
         }
