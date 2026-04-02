@@ -1353,7 +1353,7 @@ async function processarLotePlanilha(rows) {
         complemento: String(row.vendedor_complemento || '').trim(),
         bairro: String(row.vendedor_bairro || '').trim(),
         municipio: String(row.vendedor_cidade || '').trim(),
-        codigo_municipio: String(row.vendedor_cidade_ibge || '').replace(/\D/g, ''),
+        codigo_municipio: row.vendedor_cidade_ibge ? String(row.vendedor_cidade_ibge).replace(/\D/g, '') : null,
         uf: String(row.vendedor_uf || '').toUpperCase().trim(),
         cep: String(row.vendedor_cep || '').replace(/\D/g, '')
       },

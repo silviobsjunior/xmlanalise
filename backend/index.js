@@ -1583,7 +1583,30 @@ app.post('/api/incluir-manual', async (req, res) => {
 
         await client.query('BEGIN');
 
-        // 1. INSERIR/OBTER EMITENTE (Fornecedor informado)
+        // 1. RECUPERAR CÓDIGO IBGE SE NÃO INFORMADO
+        let codigoIbgeFinal = vendedor.codigo_municipio ? String(vendedor.codigo_municipio).replace(/\D/g, '') : null;
+        
+        if (!codigoIbgeFinal && vendedor.municipio && vendedor.uf) {
+            try {
+                const resMun = await client.query(
+                    `SELECT m.codigo_ibge 
+                     FROM municipios m
+                     JOIN ufs u ON m.codigo_uf = u.codigo_uf
+                     WHERE (UPPER(m.nome) = UPPER($1) OR UPPER(m.nome_sem_acento) = UPPER($1))
+                       AND u.sigla = UPPER($2)
+                     LIMIT 1`,
+                    [vendedor.municipio, vendedor.uf]
+                );
+                if (resMun.rows.length > 0) {
+                    codigoIbgeFinal = resMun.rows[0].codigo_ibge;
+                    console.log(`${getTimestamp()} 📍 Código IBGE recuperado via DB: ${codigoIbgeFinal}`);
+                }
+            } catch (e) {
+                console.warn(`${getTimestamp()} ⚠️ Falha ao buscar IBGE automático:`, e.message);
+            }
+        }
+
+        // 2. INSERIR/OBTER EMITENTE (Fornecedor informado)
         let idEmitenteInt = null;
         const emitenteExistente = await client.query(
             `SELECT id FROM emitentes WHERE cnpj = $1`, [vendedor.cnpj]
@@ -1601,7 +1624,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                 [
                     vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
                     vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, vendedor.codigo_municipio, vendedor.uf, vendedor.cep,
+                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal || null, vendedor.uf, vendedor.cep,
                     idEmitenteInt
                 ]
             );
@@ -1616,7 +1639,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                 [
                     vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
                     vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, vendedor.codigo_municipio, vendedor.uf, vendedor.cep
+                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal || null, vendedor.uf, vendedor.cep
                 ]
             );
             idEmitenteInt = result.rows[0].id;
