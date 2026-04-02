@@ -5,7 +5,7 @@ const API = window.location.origin;
 let supabaseClient = null;
 let currentUser = null;
 let currentToken = null;
-let perspectivaPadrao = 'consumidor'; // 'consumidor' | 'emitente' | 'revendedor'
+let perspectivaPadrao = 'emitente'; // 'consumidor' | 'emitente' | 'revendedor'
 let configCache = null;
 let userIsAdmin = false;
 
@@ -186,7 +186,7 @@ function getAnonymousSessionId() {
 async function loginWithGoogle() {
   console.log('🚀 Iniciando redirecionamento para o Google...');
   showToast('Iniciando login com Google...', 'info');
-  
+
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: 'google',
     options: {
@@ -197,7 +197,7 @@ async function loginWithGoogle() {
       }
     }
   });
-  
+
   if (error) {
     console.error('❌ Erro no login Google:', error);
     showToast('Erro ao iniciar login: ' + error.message, 'error');
@@ -228,14 +228,14 @@ async function migrarDadosAnonimos(sessionId) {
 function showUserLoggedIn(user) {
   const nome = user.user_metadata?.full_name || user.email || 'Usuário';
   const avatar = user.user_metadata?.avatar_url;
-  
+
   // Novos elementos Desktop
   const desktopLoginBtn = document.getElementById('desktopLoginBtn');
   const desktopLogoutBtn = document.getElementById('desktopLogoutBtn');
   const desktopUserInfo = document.getElementById('desktopUserInfo');
   const desktopUserName = document.getElementById('desktopUserName');
   const desktopAvatar = document.getElementById('desktopAvatar');
-  
+
   if (desktopLoginBtn) desktopLoginBtn.style.display = 'none';
   if (desktopLogoutBtn) desktopLogoutBtn.style.display = 'inline-flex';
   if (desktopUserInfo) desktopUserInfo.style.display = 'flex';
@@ -312,7 +312,7 @@ async function carregarFiltros() {
   console.log('📡 Buscando filtros base do servidor...');
   const data = await fetchComRetry(`${API}/api/filtros-vendedores`);
   console.log('📦 Dados de filtros recebidos:', data);
-  
+
   if (!data || !data.sucesso) {
     console.warn('Backend retornou erro nos filtros:', data?.erro);
     return;
@@ -320,9 +320,9 @@ async function carregarFiltros() {
 
   baseFiltrosGlobal.cidades = data.cidades || [];
   baseFiltrosGlobal.bairros = data.bairros || [];
-  
+
   console.log(`✅ Base global: ${baseFiltrosGlobal.cidades.length} cidades, ${baseFiltrosGlobal.bairros.length} bairros`);
-  
+
   repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros, false);
   detectarLocalizacaoUsuario();
 }
@@ -333,7 +333,7 @@ function repopularSelects(cidades, bairros, manterSelecao = true) {
 
   const cidadeAtual = selectCidade.value;
   selectCidade.innerHTML = '<option value="">📍 Todas as cidades</option>';
-  
+
   // Cidades únicas ordenadas
   const cidadesUnicas = [...new Map(cidades.map(c => [c.municipio, c])).values()]
     .sort((a, b) => a.municipio.localeCompare(b.municipio));
@@ -359,7 +359,7 @@ function popularBairros(cidadeFiltro, listaBairros = null) {
   // Se não passou lista, usa a base global ou a encontrada na busca
   const fonte = listaBairros || (filtrosEncontradosNaBusca.bairros.length > 0 ? filtrosEncontradosNaBusca.bairros : baseFiltrosGlobal.bairros);
 
-  const filtrados = cidadeFiltro 
+  const filtrados = cidadeFiltro
     ? fonte.filter(b => b.municipio === cidadeFiltro)
     : fonte;
 
@@ -388,16 +388,16 @@ async function detectarLocalizacaoUsuario() {
         const cidade = data.address.city || data.address.town || data.address.village;
         console.log('🏙️ Cidade detectada por GPS:', cidade);
         if (cidade) selecionarCidadeNosFiltros(cidade);
-      } catch (e) { 
+      } catch (e) {
         console.warn('Falha reverse geocode, tentando IP');
-        tentarLocalizacaoPorIP(); 
+        tentarLocalizacaoPorIP();
       }
     }, (err) => {
       console.warn('GPS negado ou falhou:', err.message);
       tentarLocalizacaoPorIP();
     }, { timeout: 8000, enableHighAccuracy: true });
-  } else { 
-    tentarLocalizacaoPorIP(); 
+  } else {
+    tentarLocalizacaoPorIP();
   }
 }
 
@@ -406,26 +406,26 @@ async function tentarLocalizacaoPorIP() {
     const res = await fetch('https://ipapi.co/json/');
     const data = await res.json();
     if (data.city) selecionarCidadeNosFiltros(data.city);
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function selecionarCidadeNosFiltros(nomeCidade) {
   const selectCidade = document.getElementById('filtroCidade');
   if (!selectCidade || !nomeCidade) return;
-  
+
   // Normaliza removendo acentos, convertendo para uppercase e removendo espaços extras
   function normalizar(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
   }
-  
+
   const cidadeNorm = normalizar(nomeCidade);
   console.log(`📍 Procurando "${nomeCidade}" (normalizado: "${cidadeNorm}") em ${selectCidade.options.length} opções`);
-  
+
   let encontrada = false;
   for (let i = 1; i < selectCidade.options.length; i++) { // pula index 0 ("Todas as cidades")
     const optValue = normalizar(selectCidade.options[i].value);
     const optText = normalizar(selectCidade.options[i].textContent);
-    
+
     if (optValue === cidadeNorm || optText.startsWith(cidadeNorm) || cidadeNorm === optValue.split(' - ')[0] || cidadeNorm === optValue.split(' — ')[0]) {
       selectCidade.selectedIndex = i;
       selectCidade.dispatchEvent(new Event('change'));
@@ -541,7 +541,7 @@ function renderizarResultados(resultados, termo) {
     const localizacao = [v.cidade, v.uf].filter(Boolean).join(' — ');
 
     const produtosHtml = item.produtos.slice(0, 5).map(p => {
-      const ncmHtml = p.ncm 
+      const ncmHtml = p.ncm
         ? `<span onclick="setNcmFilter('${p.ncm}')" style="cursor:pointer; color:#667eea; text-decoration:underline; margin-left:4px; font-weight:600;" title="Clique para filtrar por este NCM">#${p.ncm}</span>`
         : '';
       return `
@@ -649,7 +649,7 @@ function renderizarResultados(resultados, termo) {
 function setupNcmAutocomplete() {
   const inputNcm = document.getElementById('filtroNcm');
   const sugestoesCont = document.getElementById('ncmSugestoes');
-  
+
   if (!inputNcm || !sugestoesCont) return;
 
   let timeout = null;
@@ -823,11 +823,11 @@ async function executarUpload(files) {
 async function uploadXML(file) {
   const formData = new FormData();
   formData.append('xml', file);
-  
+
   // Mapeia a perspectiva selecionada para o backend
   // perspectivaPadrao pode ser 'consumidor', 'emitente' ou 'revendedor'
   formData.append('perspectiva', perspectivaPadrao);
-  
+
   const headers = {};
   if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
   const response = await fetch(`${API}/api/processar-xml`, {
@@ -888,7 +888,7 @@ async function loadNotas(search = '', pagina = 1, porPagina = null) {
         </div>`;
       fileList.appendChild(li);
     });
-    
+
     renderPaginacao(data.paginacao);
 
   } catch (e) {
@@ -905,7 +905,7 @@ async function carregarEstatisticasGerais() {
   console.log('📊 Buscando estatísticas gerais...');
   const data = await fetchComRetry(`${API}/api/estatisticas-gerais`);
   console.log('📊 Dados estatísticas:', data);
-  
+
   if (data && data.sucesso) {
     container.innerHTML = `
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 15px; margin-bottom: 24px;">
@@ -958,7 +958,7 @@ async function loadStatistics() {
     if (document.getElementById('totalValor')) document.getElementById('totalValor').textContent = fmt(stats.valor_total_notas);
     if (document.getElementById('totalIcms')) document.getElementById('totalIcms').textContent = fmt(stats.total_icms);
     if (document.getElementById('totalEmitentes')) document.getElementById('totalEmitentes').textContent = stats.total_emitentes_distintos || 0;
-  } catch (e) {}
+  } catch (e) { }
 }
 
 async function viewNota(id) {
@@ -982,13 +982,13 @@ async function deleteNota(id) {
     showToast('Nota excluída', 'success');
     loadNotas(paginacaoState.search, paginacaoState.pagina);
     loadStatistics();
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function setupEventListeners() {
   const loginBtns = [document.getElementById('desktopLoginBtn'), document.getElementById('sidebarLoginBtn'), document.getElementById('bannerLoginBtn')];
   const logoutBtns = [document.getElementById('desktopLogoutBtn'), document.getElementById('sidebarLogoutBtn')];
-  
+
   loginBtns.forEach(btn => btn?.addEventListener('click', loginWithGoogle));
   logoutBtns.forEach(btn => btn?.addEventListener('click', logout));
 
@@ -1004,25 +1004,25 @@ function setupEventListeners() {
     document.getElementById('filtroCidade').value = '';
     document.getElementById('filtroBairro').value = '';
     document.getElementById('filtroNcm').value = '';
-    
+
     // Reset da persistência inteligente
     filtrosEncontradosNaBusca = { cidades: [], bairros: [] };
     resultadosBuscaAtuais = [];
-    
+
     // Repopula com a base global original
     repopularSelects(baseFiltrosGlobal.cidades, baseFiltrosGlobal.bairros, false);
-    
+
     // Limpa resultados visuais
     const resultadosDiv = document.getElementById('buscaResultados');
     if (resultadosDiv) resultadosDiv.innerHTML = '';
-    
+
     const vazio = document.getElementById('buscaVazio');
     if (vazio) {
       vazio.style.display = 'block';
       const vazioMsg = document.getElementById('buscaVazioMsg');
       if (vazioMsg) vazioMsg.textContent = 'Digite um produto acima para buscar vendedores.';
     }
-    
+
     showToast('Filtros limpos', 'info');
   });
 
@@ -1036,7 +1036,7 @@ function setupEventListeners() {
       uploadArea.addEventListener('drop', handleDrop);
     }
     fileInput?.addEventListener('change', (e) => processMultipleFiles(Array.from(e.target.files)));
-    
+
     document.getElementById('selectFilesBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = false; fileInput.multiple = true; fileInput.click(); });
     document.getElementById('selectFolderBtn')?.addEventListener('click', () => { fileInput.webkitdirectory = true; fileInput.click(); });
   } catch (e) {
@@ -1048,7 +1048,7 @@ function setupEventListeners() {
   const sidebar = document.getElementById('sidebar');
   if (menuToggle && sidebar) {
     console.log('✅ Menu toggle e sidebar encontrados');
-    
+
     // Usar tanto click quanto touchend para garantir funcionamento mobile
     function toggleSidebar(e) {
       e.preventDefault();
@@ -1057,7 +1057,7 @@ function setupEventListeners() {
       sidebar.classList.toggle('open');
       console.log('🖱️ Sidebar toggled:', sidebar.classList.contains('open'));
     }
-    
+
     menuToggle.addEventListener('click', toggleSidebar, { passive: false });
     menuToggle.addEventListener('touchend', toggleSidebar, { passive: false });
   } else {
@@ -1089,7 +1089,7 @@ function setupEventListeners() {
   setupSpreadsheetImport();
 
   document.getElementById('searchInput')?.addEventListener('input', debounce((e) => loadNotas(e.target.value, 1), 300));
-  
+
   // Inicializa autenticação para verificar se retornou do login social
   initAuth();
 
@@ -1168,7 +1168,7 @@ function setupManualForm() {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    
+
     const submitBtn = document.getElementById('manSubmitBtn');
     if (submitBtn) {
       submitBtn.disabled = true;
@@ -1211,7 +1211,7 @@ function setupManualForm() {
     try {
       const headers = { 'Content-Type': 'application/json' };
       if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
-      
+
       const response = await fetch(`${API}/api/incluir-manual`, {
         method: 'POST',
         headers,
@@ -1264,7 +1264,7 @@ window.setNcmFilter = (ncm) => {
     inputNcm.value = ncm;
     inputNcm.focus();
     showToast(`Filtro NCM definido para #${ncm}`, 'info');
-    
+
     // Pequeno efeito visual de destaque
     inputNcm.style.transition = 'all 0.3s';
     inputNcm.style.borderColor = '#667eea';
@@ -1325,17 +1325,37 @@ function setupSpreadsheetImport() {
 
 async function processarLotePlanilha(rows) {
   showToast(`⏳ Iniciando importação de ${rows.length} registros...`, 'info');
-  
+
   let sucessos = 0;
   let erros = 0;
 
   for (const row of rows) {
-    // Mapeamento baseado no IMPORTACAO_PLANILHA.md
+    // MAPEAMENTO FLEXÍVEL (Suporte a nomes de campos variados)
+    const getAttr = (prefixes, suffixes) => {
+      for (const p of prefixes) {
+        for (const s of suffixes) {
+          const key = p ? `${p}_${s}` : s;
+          if (row[key] !== undefined) return row[key];
+          // Tenta camelCase e PascalCase se necessário
+          const camel = p ? `${p}${s.charAt(0).toUpperCase()}${s.slice(1)}` : s;
+          if (row[camel] !== undefined) return row[camel];
+        }
+      }
+      return null;
+    };
+
+    const vCnpj = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['cnpj', 'identificador', 'doc']) || '').replace(/\D/g, '');
+    const vRazao = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['razao_social', 'nome', 'xnome']) || '').trim();
     
+    // Se não tiver o "mínimo dos mínimos", pula este registro
+    if (!vCnpj || !vRazao) {
+      erros++;
+      continue;
+    }
+
     // Tratamento de Data (Excel serial ou string)
-    let dataEmi = row.data_emissao;
+    let dataEmi = row.data_emissao || row.data || row.emissao;
     if (typeof dataEmi === 'number') {
-      // Converte data serial do Excel (dias desde 1900-01-01)
       const date = new Date(Math.round((dataEmi - 25569) * 86400 * 1000));
       dataEmi = date.toISOString().split('T')[0];
     } else if (!dataEmi) {
@@ -1343,40 +1363,40 @@ async function processarLotePlanilha(rows) {
     }
 
     // Tratamento de NCM (Garantir 8 dígitos)
-    let ncmStr = String(row.produto_ncm || '').replace(/\D/g, '');
-    if (ncmStr && ncmStr.length < 8) {
+    let ncmStr = String(row.produto_ncm || row.ncm || '').replace(/\D/g, '');
+    if (ncmStr && ncmStr.length > 0 && ncmStr.length < 8) {
       ncmStr = ncmStr.padStart(8, '0');
     }
 
     const payload = {
       vendedor: {
-        cnpj: String(row.vendedor_cnpj || '').replace(/\D/g, ''),
-        razao_social: String(row.vendedor_razao_social || '').trim(),
-        nome_fantasia: String(row.vendedor_nome_fantasia || '').trim(),
-        telefone: String(row.vendedor_telefone || '').trim(),
-        logradouro: String(row.vendedor_logradouro || '').trim(),
-        numero: String(row.vendedor_numero || '').trim(),
-        complemento: String(row.vendedor_complemento || '').trim(),
-        bairro: String(row.vendedor_bairro || '').trim(),
-        municipio: String(row.vendedor_cidade || '').trim(),
-        codigo_municipio: row.vendedor_cidade_ibge ? String(row.vendedor_cidade_ibge).replace(/\D/g, '') : null,
-        uf: String(row.vendedor_uf || '').toUpperCase().trim(),
-        cep: String(row.vendedor_cep || '').replace(/\D/g, '')
+        cnpj: vCnpj,
+        razao_social: vRazao,
+        nome_fantasia: String(row.vendedor_nome_fantasia || row.fantasia || vRazao).trim(),
+        telefone: String(row.vendedor_telefone || row.telefone || '').trim(),
+        logradouro: String(row.vendedor_logradouro || row.logradouro || '').trim(),
+        numero: String(row.vendedor_numero || row.numero || '').trim(),
+        complemento: String(row.vendedor_complemento || row.complemento || '').trim(),
+        bairro: String(row.vendedor_bairro || row.bairro || '').trim(),
+        municipio: String(row.vendedor_cidade || row.municipio || row.cidade || '').trim(),
+        codigo_municipio: (row.vendedor_cidade_ibge || row.ibge || row.cmun) ? String(row.vendedor_cidade_ibge || row.ibge || row.cmun).replace(/\D/g, '') : null,
+        uf: String(row.vendedor_uf || row.uf || '').toUpperCase().trim(),
+        cep: String(row.vendedor_cep || row.cep || '').replace(/\D/g, '')
       },
       produto: {
-        codigo_barras: String(row.produto_cean || '').trim(),
-        descricao: String(row.produto_descricao || '').trim(),
+        codigo_barras: String(row.produto_cean || row.cean || row.barras || '').trim(),
+        descricao: String(row.produto_descricao || row.descricao || row.xprod || '').trim(),
         ncm: ncmStr,
-        unidade: String(row.produto_unidade || 'UN').trim(),
-        quantidade: parseFloat(row.produto_quantidade) || 0,
-        valor_unitario: parseFloat(row.produto_valor_unitario) || 0
+        unidade: String(row.produto_unidade || row.unidade || row.ucom || 'UN').trim(),
+        quantidade: parseFloat(row.produto_quantidade || row.quantidade || row.qcom) || 0,
+        valor_unitario: parseFloat(row.produto_valor_unitario || row.valor_unitario || row.vuncom || row.valor_unit || row.preco) || 0
       },
       data_emissao: dataEmi,
-      perspectiva: String(row.perspectiva || 'vendedor').toLowerCase().trim()
+      perspectiva: String(row.perspectiva || row.tipo || 'vendedor').toLowerCase().trim()
     };
 
-    // Validação mínima: CNPJ, Razão Social, Logradouro, Bairro, Cidade, UF, CEP e Descrição do Produto
-    if (!payload.vendedor.cnpj || !payload.vendedor.razao_social || !payload.produto.descricao) {
+    // Validação de Descrição do Produto
+    if (!payload.produto.descricao) {
       erros++;
       continue;
     }
@@ -1384,7 +1404,7 @@ async function processarLotePlanilha(rows) {
     try {
       const headers = { 'Content-Type': 'application/json' };
       if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
-      
+
       const res = await fetch(`${API}/api/incluir-manual`, {
         method: 'POST',
         headers,

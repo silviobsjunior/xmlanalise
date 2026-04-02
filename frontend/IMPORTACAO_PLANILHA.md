@@ -8,7 +8,7 @@ Para que a busca pública funcione corretamente, os campos marcados com **(Obrig
 
 | Coluna | Descrição | Obrigatório | Conteúdo XML (NF-e) |
 | :--- | :--- | :--- | :--- |
-| **perspectiva** | Papel no sistema (`vendedor`, `comprador` ou `ambos`) | Sim | Fixo ou Lógica de Negócio |
+| **perspectiva** | Papel no sistema (`vendedor`, `comprador`, `consumidor` ou `ambos`) | Sim | Fixo ou Lógica de Negócio |
 | **vendedor_cnpj** | CNPJ do Vendedor (apenas números) | Sim | `/infNFe/emit/CNPJ` |
 | **vendedor_razao_social** | Razão Social do Vendedor | Sim | `/infNFe/emit/xNome` |
 | **vendedor_nome_fantasia** | Nome Fantasia do Vendedor | Não | `/infNFe/emit/xFant` |
@@ -35,9 +35,10 @@ A macro de importação deve garantir que:
 1.  **Colunas Mínimas**: Mesmo que o usuário remova colunas opcionais, a macro deve validar se as colunas **Sim** na tabela acima permanecem presentes.
 2.  **Valores Padrão**: Se as colunas de `quantidade` ou `valor` forem removidas pelo usuário, a macro deve inserir `0` nestas colunas internamente antes do upload.
 3.  **Perspectiva**: Se o usuário não definir, o padrão deve ser `vendedor`.
-    *   `vendedor`: Vincula o produto ao emitente.
-    *   `comprador`: Vincula o produto ao destinatário (útil para registrar que "eu comprei de X" e aparecer como revendedor).
-    *   `ambos`: Registra as duas visões.
+    *   `vendedor` (ou `emitente`): Vincula o produto ao emitente.
+    *   `comprador` (ou `revendedor`): Vincula o produto ao destinatário (útil para registrar que "eu comprei de X" e aparecer como revendedor).
+    *   `consumidor`: Vincula o produto ao emitente (uso interno para controle de consumo).
+    *   `ambos`: Registra as visões de vendedor e revendedor.
 
 ---
 *Documento gerado automaticamente para suporte à integração offline.*

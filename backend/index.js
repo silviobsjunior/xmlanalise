@@ -732,13 +732,22 @@ app.get('/api/filtros-vendedores', async (req, res) => {
             SELECT DISTINCT e.municipio, e.uf FROM emitentes e
             INNER JOIN atores a ON a.identificador = e.cnpj
             INNER JOIN notas_fiscais nf ON nf.emitente_id = a.id
-            WHERE nf.perspectiva_importador = 'emitente'
+            WHERE nf.perspectiva_importador IN ('emitente', 'consumidor')
+              AND e.cnpj ~ '^[0-9]{14}$'
+              AND e.municipio IS NOT NULL AND e.municipio != ''
+            UNION
+            SELECT DISTINCT e.municipio, e.uf FROM emitentes e
+            INNER JOIN atores a ON a.identificador = e.cnpj
+            INNER JOIN notas_fiscais nf ON nf.emitente_id = a.id
+            WHERE nf.perspectiva_importador = 'revendedor'
+              AND e.cnpj ~ '^[0-9]{14}$'
               AND e.municipio IS NOT NULL AND e.municipio != ''
             UNION
             SELECT DISTINCT d.municipio, d.uf FROM destinatarios d
             INNER JOIN atores a ON a.identificador = d.cnpj
             INNER JOIN notas_fiscais nf ON nf.destinatario_id = a.id
             WHERE nf.perspectiva_importador = 'revendedor'
+              AND d.cnpj ~ '^[0-9]{14}$'
               AND d.municipio IS NOT NULL AND d.municipio != ''
             ORDER BY uf, municipio
         `);
@@ -746,13 +755,22 @@ app.get('/api/filtros-vendedores', async (req, res) => {
             SELECT DISTINCT e.bairro, e.municipio, e.uf FROM emitentes e
             INNER JOIN atores a ON a.identificador = e.cnpj
             INNER JOIN notas_fiscais nf ON nf.emitente_id = a.id
-            WHERE nf.perspectiva_importador = 'emitente'
+            WHERE nf.perspectiva_importador IN ('emitente', 'consumidor')
+              AND e.cnpj ~ '^[0-9]{14}$'
+              AND e.bairro IS NOT NULL AND e.bairro != ''
+            UNION
+            SELECT DISTINCT e.bairro, e.municipio, e.uf FROM emitentes e
+            INNER JOIN atores a ON a.identificador = e.cnpj
+            INNER JOIN notas_fiscais nf ON nf.emitente_id = a.id
+            WHERE nf.perspectiva_importador = 'revendedor'
+              AND e.cnpj ~ '^[0-9]{14}$'
               AND e.bairro IS NOT NULL AND e.bairro != ''
             UNION
             SELECT DISTINCT d.bairro, d.municipio, d.uf FROM destinatarios d
             INNER JOIN atores a ON a.identificador = d.cnpj
             INNER JOIN notas_fiscais nf ON nf.destinatario_id = a.id
             WHERE nf.perspectiva_importador = 'revendedor'
+              AND d.cnpj ~ '^[0-9]{14}$'
               AND d.bairro IS NOT NULL AND d.bairro != ''
             ORDER BY municipio, bairro
         `);
@@ -858,6 +876,29 @@ app.get('/api/buscar-produtos', async (req, res) => {
         }
 
         const queryStr = `
+            -- PARTE 1: PERSPECTIVAS 'emitente' OU 'consumidor' -> EXIBE APENAS O EMITENTE
+            SELECT p.codigo_barras AS cean, p.descricao AS descricao_produto, p.ncm,
+                   e.cnpj AS vendedor_cnpj, e.razao_social AS vendedor_razao_social,
+                   e.nome_fantasia AS vendedor_nome_fantasia,
+                   e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
+                   e.complemento AS vendedor_complemento, e.bairro AS vendedor_bairro,
+                   e.municipio AS vendedor_cidade, e.uf AS vendedor_uf,
+                   e.cep AS vendedor_cep, e.telefone AS vendedor_telefone, 
+                   nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
+            FROM produtos_nfe p
+            JOIN nfe_importadas ni ON p.nfe_id = ni.id
+            JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
+            JOIN atores a          ON nf.emitente_id = a.id
+            JOIN emitentes e       ON a.identificador = e.cnpj
+            WHERE e.cnpj IS NOT NULL 
+              AND e.cnpj ~ '^[0-9]{14}$' -- LGPD: Garante que é CNPJ
+              AND nf.perspectiva_importador IN ('emitente', 'consumidor')
+              AND ${sqlTermo} ${filtroE}
+
+            UNION ALL
+
+            -- PARTE 2: PERSPECTIVA 'revendedor' -> EXIBE TANTO EMITENTE QUANTO DESTINATÁRIO
+            -- Subparte A: Emitente na perspectiva revendedor
             SELECT p.codigo_barras AS cean, p.descricao AS descricao_produto, p.ncm,
                    e.cnpj AS vendedor_cnpj, e.razao_social AS vendedor_razao_social,
                    e.nome_fantasia AS vendedor_nome_fantasia,
@@ -872,11 +913,13 @@ app.get('/api/buscar-produtos', async (req, res) => {
             JOIN atores a          ON nf.emitente_id = a.id
             JOIN emitentes e       ON a.identificador = e.cnpj
             WHERE e.cnpj IS NOT NULL
-              AND nf.perspectiva_importador = 'emitente'
+              AND e.cnpj ~ '^[0-9]{14}$' -- LGPD: Garante que é CNPJ
+              AND nf.perspectiva_importador = 'revendedor'
               AND ${sqlTermo} ${filtroE}
 
             UNION ALL
 
+            -- Subparte B: Destinatário na perspectiva revendedor
             SELECT p.codigo_barras AS cean, p.descricao AS descricao_produto, p.ncm,
                    d.cnpj AS vendedor_cnpj, d.razao_social AS vendedor_razao_social,
                    NULL AS vendedor_nome_fantasia,
@@ -890,8 +933,9 @@ app.get('/api/buscar-produtos', async (req, res) => {
             JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
             JOIN atores a          ON nf.destinatario_id = a.id
             JOIN destinatarios d   ON a.identificador = d.cnpj
-            WHERE nf.perspectiva_importador = 'revendedor'
-              AND d.cnpj IS NOT NULL
+            WHERE d.cnpj IS NOT NULL
+              AND d.cnpj ~ '^[0-9]{14}$' -- LGPD: Garante que é CNPJ
+              AND nf.perspectiva_importador = 'revendedor'
               AND ${sqlTermo} ${filtroD}
 
             ORDER BY data_emissao DESC LIMIT 300
@@ -1364,8 +1408,50 @@ app.post('/api/processar-xml', upload.single('xml'), async (req, res) => {
         }
 
         // =============================================
-        // 4. INSERIR NOTA FISCAL
+        // 4. REGRAS DE NEGÓCIO E PERSPECTIVA (LGPD)
         // =============================================
+        const perspectiva = req.body?.perspectiva || 'emitente';
+
+        // REGRA 1: Se perspectiva for 'consumidor' ou 'emitente', o emitente DEVE ser CNPJ
+        if (['consumidor', 'emitente'].includes(perspectiva)) {
+            const docEmitente = nfeData.emitente?.cnpj || nfeData.emitente?.cpf;
+            if (!docEmitente || docEmitente.replace(/\D/g, '').length !== 14) {
+                console.log(`${getTimestamp()} 🚫 Importação cancelada: Emitente é CPF em perspectiva pública.`);
+                return res.status(400).json({
+                    sucesso: false,
+                    erro: 'Para as perspectivas "Consumidor" ou "Vendedor", o Emitente deve ser obrigatoriamente uma Pessoa Jurídica (CNPJ).'
+                });
+            }
+        }
+
+        // REGRA 2: Se perspectiva for 'consumidor', o destinatário REAL é ocultado
+        if (perspectiva === 'consumidor') {
+            console.log(`${getTimestamp()} 🔒 Perspectiva 'consumidor': Vinculando a CONSUMIDOR_FINAL para privacidade.`);
+            const atorConsumidor = await client.query(`SELECT id FROM atores WHERE identificador = 'CONSUMIDOR_FINAL' LIMIT 1`);
+            if (atorConsumidor.rows.length > 0) {
+                destinatarioUUID = atorConsumidor.rows[0].id;
+            } else {
+                const result = await client.query(
+                    `INSERT INTO atores (tipo_identificador, identificador, razao_social, nome_fantasia, tipo_pessoa, created_at, updated_at)
+                     VALUES ('OUT', 'CONSUMIDOR_FINAL', 'Consumidor Final Não Identificado', 'Consumidor Final', 'FISICA', NOW(), NOW())
+                     RETURNING id`
+                );
+                destinatarioUUID = result.rows[0].id;
+            }
+        }
+
+        // REGRA 3: Se perspectiva for 'revendedor', o destinatário (quem comprou para revender) DEVE ser CNPJ
+        if (perspectiva === 'revendedor') {
+            const docDestinatario = nfeData.destinatario?.cnpj || nfeData.destinatario?.cpf || nfeData.destinatario?.id_estrangeiro;
+            if (!docDestinatario || docDestinatario.replace(/\D/g, '').length !== 14) {
+                console.log(`${getTimestamp()} 🚫 Importação cancelada: Destinatário é CPF em perspectiva de revenda.`);
+                return res.status(400).json({
+                    sucesso: false,
+                    erro: 'Na perspectiva "Revendedor", o Destinatário deve ser obrigatoriamente uma Pessoa Jurídica (CNPJ).'
+                });
+            }
+        }
+
         const nota = nfeData.nota_fiscal || {};
 
         if (!destinatarioUUID) {
@@ -1577,11 +1663,27 @@ app.post('/api/incluir-manual', async (req, res) => {
     try {
         const { vendedor, produto, data_emissao, perspectiva = 'vendedor' } = req.body;
 
+        // VALIDAÇÃO DE PERSPECTIVA E PRIVACIDADE (LGPD)
+        if (['vendedor', 'emitente', 'consumidor'].includes(perspectiva)) {
+            const cnpjLimpo = String(vendedor?.cnpj || '').replace(/\D/g, '');
+            if (cnpjLimpo.length !== 14) {
+                return res.status(400).json({
+                    sucesso: false,
+                    erro: 'Para as perspectivas "Vendedor" ou "Consumidor", o fornecedor deve ser obrigatoriamente uma Pessoa Jurídica (CNPJ).'
+                });
+            }
+        }
+
         if (!vendedor || !produto) {
             return res.status(400).json({ sucesso: false, erro: 'Dados de vendedor e produto são obrigatórios' });
         }
 
         await client.query('BEGIN');
+
+        // 0. NORMALIZAR DADOS DO VENDEDOR
+        const cnpjLimpo = String(vendedor.cnpj || '').replace(/\D/g, '');
+        const razaoSocial = String(vendedor.razao_social || 'FORNECEDOR MANUAL').substring(0, 100);
+        const nomeFantasia = String(vendedor.nome_fantasia || vendedor.razao_social || 'FORNECEDOR MANUAL').substring(0, 100);
 
         // 1. RECUPERAR CÓDIGO IBGE SE NÃO INFORMADO
         let codigoIbgeFinal = vendedor.codigo_municipio ? String(vendedor.codigo_municipio).replace(/\D/g, '') : null;
@@ -1609,7 +1711,7 @@ app.post('/api/incluir-manual', async (req, res) => {
         // 2. INSERIR/OBTER EMITENTE (Fornecedor informado)
         let idEmitenteInt = null;
         const emitenteExistente = await client.query(
-            `SELECT id FROM emitentes WHERE cnpj = $1`, [vendedor.cnpj]
+            `SELECT id FROM emitentes WHERE cnpj = $1`, [cnpjLimpo]
         );
 
         if (emitenteExistente.rows.length > 0) {
@@ -1622,9 +1724,9 @@ app.post('/api/incluir-manual', async (req, res) => {
                     atualizado_em = NOW()
                  WHERE id = $12`,
                 [
-                    vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
-                    vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal, vendedor.uf, vendedor.cep,
+                    razaoSocial, nomeFantasia, vendedor.telefone || null,
+                    vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null,
+                    vendedor.bairro || null, vendedor.municipio || null, codigoIbgeFinal, vendedor.uf || null, (vendedor.cep || '').replace(/\D/g, ''),
                     idEmitenteInt
                 ]
             );
@@ -1637,9 +1739,9 @@ app.post('/api/incluir-manual', async (req, res) => {
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
                 RETURNING id`,
                 [
-                    vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, vendedor.telefone,
-                    vendedor.logradouro, vendedor.numero, vendedor.complemento,
-                    vendedor.bairro, vendedor.municipio, codigoIbgeFinal, vendedor.uf, vendedor.cep
+                    cnpjLimpo, razaoSocial, nomeFantasia, vendedor.telefone || null,
+                    vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null,
+                    vendedor.bairro || null, vendedor.municipio || null, codigoIbgeFinal, vendedor.uf || null, (vendedor.cep || '').replace(/\D/g, '')
                 ]
             );
             idEmitenteInt = result.rows[0].id;
@@ -1648,7 +1750,7 @@ app.post('/api/incluir-manual', async (req, res) => {
         // 2. INSERIR/OBTER ATORES
         let emitenteUUID = null;
         const atorExistente = await client.query(
-            `SELECT id FROM atores WHERE identificador = $1`, [vendedor.cnpj]
+            `SELECT id FROM atores WHERE identificador = $1`, [cnpjLimpo]
         );
 
         if (atorExistente.rows.length > 0) {
@@ -1657,10 +1759,10 @@ app.post('/api/incluir-manual', async (req, res) => {
             const result = await client.query(
                 `INSERT INTO atores (
                     tipo_identificador, identificador, razao_social, 
-                    nome_fantasia, inscricao_estadual, inscricao_municipal, tipo_pessoa, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+                    nome_fantasia, tipo_pessoa, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
                 RETURNING id`,
-                ['CNPJ', vendedor.cnpj, vendedor.razao_social, vendedor.nome_fantasia, null, null, 'JURIDICA']
+                ['CNPJ', cnpjLimpo, razaoSocial, nomeFantasia, 'JURIDICA']
             );
             emitenteUUID = result.rows[0].id;
         }
@@ -1668,14 +1770,22 @@ app.post('/api/incluir-manual', async (req, res) => {
         // 3. DEFINIR DESTINATÁRIO (DUMMY OU USUÁRIO)
         let destinatarioUUID = null;
         const atorConsumidor = await client.query(`SELECT id FROM atores WHERE identificador = 'CONSUMIDOR_FINAL' LIMIT 1`);
-        destinatarioUUID = atorConsumidor.rows[0].id;
+        if (atorConsumidor.rows.length > 0) {
+            destinatarioUUID = atorConsumidor.rows[0].id;
+        } else {
+            const result = await client.query(
+                `INSERT INTO atores (tipo_identificador, identificador, razao_social, nome_fantasia, tipo_pessoa, created_at, updated_at)
+                 VALUES ('OUT', 'CONSUMIDOR_FINAL', 'Consumidor Final Não Identificado', 'Consumidor Final', 'FISICA', NOW(), NOW())
+                 RETURNING id`
+            );
+            destinatarioUUID = result.rows[0].id;
+        }
 
         // Tratar data de emissão manual
         let manualData = data_emissao;
         if (!manualData) {
             manualData = new Date().toISOString();
         } else if (!manualData.includes('T')) {
-            // Se vier apenas YYYY-MM-DD, tenta converter para ISO full
             try {
                 manualData = new Date(manualData).toISOString();
             } catch (e) {
@@ -1690,7 +1800,6 @@ app.post('/api/incluir-manual', async (req, res) => {
         async function salvarNotaEProduto(pImportador) {
             const manualChave = `MANUAL-${pImportador}-${crypto.randomUUID()}`;
             
-            // Garantir que valores numéricos não sejam NaN/null para o cálculo
             const qtd = parseFloat(produto.quantidade) || 0;
             const vUnit = parseFloat(produto.valor_unitario) || 0;
             const vTotal = qtd * vUnit;
@@ -1705,7 +1814,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())`,
                 [
                     manualChave, 0, 0, manualData, 'MANUAL',
-                    'INCLUSÃO MANUAL', 1, 1, true, 0, 1, '4.00', // Defaults para campos obrigatórios
+                    'INCLUSÃO MANUAL', 1, 1, true, 0, 1, '4.00',
                     emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId,
                     pImportador, vTotal,
                 ]
@@ -1724,21 +1833,24 @@ app.post('/api/incluir-manual', async (req, res) => {
                     descricao, ncm, cfop, quantidade, valor_unitario, valor_total, created_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
                 [
-                    idNfeImportada, 1, 'MANUAL', produto.codigo_barras || null,
-                    produto.descricao, produto.ncm || null, '0000', qtd, vUnit, vTotal
+                    idNfeImportada, 1, 'MANUAL', (produto.codigo_barras || '').replace(/\D/g, '') || null,
+                    String(produto.descricao || 'PRODUTO MANUAL').substring(0, 200), (produto.ncm || '').replace(/\D/g, '') || null, '0000', qtd, vUnit, vTotal
                 ]
             );
         }
 
         // 5. EXECUTAR PERSPECTIVA(S)
-        if (perspectiva === 'vendedor') {
+        if (perspectiva === 'vendedor' || perspectiva === 'emitente') {
             await salvarNotaEProduto('emitente');
-        } else if (perspectiva === 'comprador') {
+        } else if (perspectiva === 'comprador' || perspectiva === 'revendedor') {
+            await salvarNotaEProduto('revendedor');
+        } else if (perspectiva === 'consumidor') {
+            await salvarNotaEProduto('consumidor');
+        } else if (perspectiva === 'ambos') {
+            await salvarNotaEProduto('emitente');
             await salvarNotaEProduto('revendedor');
         } else {
-            // Ambos: cria um de cada para indexar em todas as frentes de busca
             await salvarNotaEProduto('emitente');
-            await salvarNotaEProduto('revendedor');
         }
 
         await client.query('COMMIT');
