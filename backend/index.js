@@ -1798,7 +1798,8 @@ app.post('/api/incluir-manual', async (req, res) => {
 
         // 4. FUNÇÃO AUXILIAR PARA CRIAR O REGISTRO
         async function salvarNotaEProduto(pImportador) {
-            const manualChave = `MANUAL-${pImportador}-${crypto.randomUUID()}`;
+            // UUID sem traços tem 32 caracteres. 'MANUAL-' + 32 = 39 caracteres (<= 44)
+            const manualChave = `MANUAL-${crypto.randomUUID().replace(/-/g, '')}`;
             
             const qtd = parseFloat(produto.quantidade) || 0;
             const vUnit = parseFloat(produto.valor_unitario) || 0;
