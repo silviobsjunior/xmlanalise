@@ -1175,6 +1175,12 @@ function setupManualForm() {
       submitBtn.textContent = '⏳ Salvando...';
     }
 
+    // Tratamento de NCM (Garantir 8 dígitos se informado)
+    let ncmManual = document.getElementById('manProdNcm').value.replace(/\D/g, '');
+    if (ncmManual && ncmManual.length > 0 && ncmManual.length < 8) {
+      ncmManual = ncmManual.padStart(8, '0');
+    }
+
     const data = {
       vendedor: {
         cnpj: document.getElementById('manVendCnpj').value.replace(/\D/g, ''),
@@ -1186,14 +1192,14 @@ function setupManualForm() {
         complemento: document.getElementById('manVendCompl').value,
         bairro: document.getElementById('manVendBairro').value,
         municipio: document.getElementById('manVendCidade').value,
-        codigo_municipio: document.getElementById('manVendIbge').value.replace(/\D/g, ''),
+        codigo_municipio: document.getElementById('manVendIbge').value.replace(/\D/g, '') || null,
         uf: document.getElementById('manVendUf').value.toUpperCase(),
         cep: document.getElementById('manVendCep').value.replace(/\D/g, '')
       },
       produto: {
         codigo_barras: document.getElementById('manProdCean').value,
         descricao: document.getElementById('manProdDesc').value,
-        ncm: document.getElementById('manProdNcm').value.replace(/\D/g, ''),
+        ncm: ncmManual,
         unidade: 'UN',
         quantidade: 0,
         valor_unitario: 0

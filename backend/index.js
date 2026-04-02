@@ -1678,16 +1678,24 @@ app.post('/api/incluir-manual', async (req, res) => {
         async function salvarNotaEProduto(pImportador) {
             const manualChave = `MANUAL-${pImportador}-${crypto.randomUUID()}`;
             
+            // Garantir que valores numéricos não sejam NaN/null para o cálculo
+            const qtd = parseFloat(produto.quantidade) || 0;
+            const vUnit = parseFloat(produto.valor_unitario) || 0;
+            const vTotal = qtd * vUnit;
+
             await client.query(
                 `INSERT INTO notas_fiscais (
                     chave_acesso, numero, serie, data_emissao, status,
+                    tipo_operacao, finalidade, consumidor_final, presenca_comprador,
+                    processo_emissao, versao_processo,
                     emitente_id, destinatario_id, usuario_id, sessao_anonima_id,
                     perspectiva_importador, valor_total_nota, created_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())`,
                 [
                     manualChave, 0, 0, manualData, 'MANUAL',
+                    1, 1, true, 0, 1, '4.00', // Defaults para campos obrigatórios
                     emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId,
-                    pImportador, (produto.valor_unitario * produto.quantidade),
+                    pImportador, vTotal,
                 ]
             );
 
@@ -1705,8 +1713,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
                 [
                     idNfeImportada, 1, 'MANUAL', produto.codigo_barras || null,
-                    produto.descricao, produto.ncm, produto.quantidade || 0,
-                    produto.valor_unitario || 0, (produto.valor_unitario || 0) * (produto.quantidade || 0)
+                    produto.descricao, produto.ncm || null, qtd, vUnit, vTotal
                 ]
             );
         }
@@ -1728,7 +1735,12 @@ app.post('/api/incluir-manual', async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error(`${getTimestamp()} ❌ Erro na inclusão manual:`, error);
-        res.status(500).json({ sucesso: false, erro: 'Erro interno ao salvar registro manual', detalhes: error.message });
+        res.status(500).json({ 
+            sucesso: false, 
+            erro: 'Erro interno ao salvar registro manual', 
+            detalhes: error.message,
+            stack: error.stack 
+        });
     } finally {
         client.release();
     }
