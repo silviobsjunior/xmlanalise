@@ -795,29 +795,136 @@ async function executarUpload(files) {
   const uploadArea = document.getElementById('uploadArea');
   const uploadProgress = document.getElementById('uploadProgress');
   if (uploadArea) uploadArea.classList.add('loading-upload');
-  if (uploadProgress) { uploadProgress.style.display = 'block'; uploadProgress.textContent = `Processando ${files.length} arquivos...`; }
+  
+  const totalFiles = files.length;
+  let successCount = 0, errorCount = 0, duplicateCount = 0, totalProducts = 0;
+  const details = [];
 
-  let successCount = 0, errorCount = 0, duplicateCount = 0;
+  if (uploadProgress) { 
+    uploadProgress.style.display = 'block'; 
+    uploadProgress.textContent = `Iniciando processamento de ${totalFiles} arquivos...`; 
+  }
 
-  for (let i = 0; i < files.length; i++) {
+  for (let i = 0; i < totalFiles; i++) {
+    const file = files[i];
+    if (uploadProgress) {
+      uploadProgress.textContent = `Processando ${i + 1} de ${totalFiles}: ${file.name}...`;
+    }
+
     try {
-      const result = await uploadXML(files[i]);
-      if (result.sucesso) successCount++;
-      else if (result.duplicado) duplicateCount++;
-      else errorCount++;
-    } catch (e) { errorCount++; }
+      const result = await uploadXML(file);
+      if (result.sucesso) {
+        successCount++;
+        totalProducts += (result.quantidade_produtos || 0);
+        details.push({ name: file.name, status: 'success', message: `${result.quantidade_produtos || 0} produtos` });
+      } else if (result.duplicado) {
+        duplicateCount++;
+        details.push({ name: file.name, status: 'duplicate', message: 'Já importado' });
+      } else {
+        errorCount++;
+        details.push({ name: file.name, status: 'error', message: result.erro || 'Erro desconhecido' });
+      }
+    } catch (e) { 
+      errorCount++; 
+      details.push({ name: file.name, status: 'error', message: e.message });
+    }
   }
 
   if (uploadArea) uploadArea.classList.remove('loading-upload');
   if (uploadProgress) uploadProgress.style.display = 'none';
 
-  showToast(`✅ ${successCount} importados | ⚠️ ${duplicateCount} duplicados | ❌ ${errorCount} erros`, successCount > 0 ? 'success' : 'warning');
+  // Mostra o resumo detalhado
+  showImportSummary({
+    title: 'Resumo da Importação XML',
+    total: totalFiles,
+    success: successCount,
+    duplicates: duplicateCount,
+    errors: errorCount,
+    totalProducts: totalProducts,
+    details: details
+  });
 
   if (successCount > 0) {
     await loadNotas();
     await loadStatistics();
     await carregarFiltros();
   }
+}
+
+function showImportSummary(summary) {
+  const modal = document.getElementById('xmlModal');
+  const modalBody = document.getElementById('modalBody');
+  const modalTitle = modal.querySelector('h3');
+  
+  if (!modal || !modalBody) return;
+
+  modalTitle.textContent = summary.title || 'Resumo da Importação';
+  
+  let html = `
+    <div style="padding: 10px 0;">
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; background: #f8fafc; padding: 16px; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <div style="text-align: center;">
+          <div style="font-size: 20px; font-weight: 800; color: #1e293b;">${summary.total}</div>
+          <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">Total</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 20px; font-weight: 800; color: #22c55e;">${summary.success}</div>
+          <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">Sucesso</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 20px; font-weight: 800; color: #eab308;">${summary.duplicates}</div>
+          <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">Ignorados</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 20px; font-weight: 800; color: #ef4444;">${summary.errors}</div>
+          <div style="font-size: 10px; color: #64748b; text-transform: uppercase; font-weight: 600;">Erros</div>
+        </div>
+      </div>
+
+      ${summary.totalProducts ? `
+      <div style="margin-bottom: 20px; padding: 12px; background: #f0f9ff; border-radius: 10px; border: 1px solid #bae6fd; display: flex; align-items: center; gap: 12px;">
+        <div style="font-size: 24px;">📦</div>
+        <div>
+          <div style="font-weight: 700; color: #0369a1;">${summary.totalProducts} produtos mapeados</div>
+          <div style="font-size: 12px; color: #0ea5e9;">Estes itens já estão disponíveis para busca.</div>
+        </div>
+      </div>
+      ` : ''}
+
+      <div style="text-align: left; max-height: 250px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 10px; background: white;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <thead style="background: #f1f5f9; position: sticky; top: 0;">
+            <tr>
+              <th style="padding: 10px; text-align: left; border-bottom: 1px solid #e2e8f0;">Item / Arquivo</th>
+              <th style="padding: 10px; text-align: center; border-bottom: 1px solid #e2e8f0;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${summary.details.map(d => `
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 10px;">
+                  <div style="font-weight: 600; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;" title="${d.name}">${d.name}</div>
+                  <div style="font-size: 11px; color: #94a3b8;">${d.message || ''}</div>
+                </td>
+                <td style="padding: 10px; text-align: center;">
+                  ${d.status === 'success' ? '<span style="color: #22c55e; background: #f0fdf4; padding: 4px 8px; border-radius: 20px; font-weight: 700;">✅ OK</span>' : 
+                    d.status === 'duplicate' ? '<span style="color: #eab308; background: #fefce8; padding: 4px 8px; border-radius: 20px; font-weight: 700;">⚠️ DUPLICADO</span>' : 
+                    '<span style="color: #ef4444; background: #fef2f2; padding: 4px 8px; border-radius: 20px; font-weight: 700;">❌ ERRO</span>'}
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top: 24px; display: flex; gap: 12px;">
+        <button class="btn btn-primary" onclick="closeModal()" style="flex: 1; padding: 12px; font-weight: 700;">Entendido</button>
+      </div>
+    </div>
+  `;
+
+  modalBody.innerHTML = html;
+  modal.classList.add('active');
 }
 
 async function uploadXML(file) {
@@ -1324,12 +1431,15 @@ function setupSpreadsheetImport() {
 }
 
 async function processarLotePlanilha(rows) {
-  showToast(`⏳ Iniciando importação de ${rows.length} registros...`, 'info');
-
+  const totalRows = rows.length;
   let sucessos = 0;
   let erros = 0;
+  const details = [];
 
-  for (const row of rows) {
+  showToast(`⏳ Iniciando importação de ${totalRows} registros...`, 'info');
+
+  for (let i = 0; i < totalRows; i++) {
+    const row = rows[i];
     // MAPEAMENTO FLEXÍVEL (Suporte a nomes de campos variados)
     const getAttr = (prefixes, suffixes) => {
       for (const p of prefixes) {
@@ -1350,6 +1460,7 @@ async function processarLotePlanilha(rows) {
     // Se não tiver o "mínimo dos mínimos", pula este registro
     if (!vCnpj || !vRazao) {
       erros++;
+      details.push({ name: `Linha ${i + 1}`, status: 'error', message: 'CNPJ ou Razão Social ausente' });
       continue;
     }
 
@@ -1398,6 +1509,7 @@ async function processarLotePlanilha(rows) {
     // Validação de Descrição do Produto
     if (!payload.produto.descricao) {
       erros++;
+      details.push({ name: vRazao, status: 'error', message: 'Descrição do produto ausente' });
       continue;
     }
 
@@ -1411,13 +1523,28 @@ async function processarLotePlanilha(rows) {
         body: JSON.stringify(payload)
       });
       const result = await res.json();
-      if (result.sucesso) sucessos++; else erros++;
+      if (result.sucesso) {
+        sucessos++;
+        details.push({ name: payload.produto.descricao, status: 'success', message: vRazao });
+      } else {
+        erros++;
+        details.push({ name: payload.produto.descricao, status: 'error', message: result.erro || 'Erro ao processar' });
+      }
     } catch (err) {
       erros++;
+      details.push({ name: payload.produto.descricao, status: 'error', message: err.message });
     }
   }
 
-  showToast(`✅ Importação concluída: ${sucessos} sucessos, ${erros} erros`, sucessos > 0 ? 'success' : 'error');
+  showImportSummary({
+    title: 'Resumo da Importação de Planilha',
+    total: totalRows,
+    success: sucessos,
+    duplicates: 0,
+    errors: erros,
+    details: details
+  });
+
   if (sucessos > 0) {
     await carregarFiltros();
     await carregarEstatisticasGerais();

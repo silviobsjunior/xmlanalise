@@ -11,6 +11,18 @@ const xml2js = require('xml2js');
 const cors = require('cors');
 require('dotenv').config();
 
+// Função para normalizar texto (MAIÚSCULO e SEM ACENTOS)
+function normalizeText(text) {
+    if (!text) return text;
+    return text
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+        .replace(/[^a-zA-Z0-9\s]/g, ' ') // Remove caracteres especiais
+        .toUpperCase()
+        .trim()
+        .replace(/\s+/g, ' '); // Remove espaços duplos
+}
+
 
 // Função para timestamp no formato dd/mm/aaaa hh:mm:ss
 function getTimestamp() {
@@ -60,7 +72,11 @@ pool.on('error', (err) => {
 // =============================================
 async function resolveMunicipio(codigoIbge, nomeOriginal, ufOriginal) {
     if (!codigoIbge && !nomeOriginal) {
-        return { nome: nomeOriginal, uf: ufOriginal };
+        return { 
+            nome: normalizeText(nomeOriginal), 
+            uf: ufOriginal ? ufOriginal.toUpperCase().trim() : ufOriginal,
+            codigo_ibge: codigoIbge 
+        };
     }
     
     try {
@@ -70,7 +86,7 @@ async function resolveMunicipio(codigoIbge, nomeOriginal, ufOriginal) {
             // Se tiver código IBGE, usa ele (7 dígitos)
             const ibge7 = String(codigoIbge).substring(0, 7);
             query = `
-                SELECT m.nome, u.sigla as uf
+                SELECT m.nome, u.sigla as uf, m.codigo_ibge
                 FROM municipios m
                 JOIN ufs u ON m.codigo_uf = u.codigo_uf
                 WHERE m.codigo_ibge = $1
@@ -78,12 +94,13 @@ async function resolveMunicipio(codigoIbge, nomeOriginal, ufOriginal) {
             `;
             params = [ibge7];
         } else {
-            // Se não tiver código, tenta buscar por nome e UF originais
+            // Se não tiver código, tenta buscar por nome e UF originais usando unaccent para ignorar acentos na busca
             query = `
-                SELECT m.nome, u.sigla as uf
+                SELECT m.nome, u.sigla as uf, m.codigo_ibge
                 FROM municipios m
                 JOIN ufs u ON m.codigo_uf = u.codigo_uf
-                WHERE UPPER(m.nome) = UPPER($1) AND u.sigla = UPPER($2)
+                WHERE (UPPER(m.nome) = UPPER($1) OR unaccent(UPPER(m.nome)) = unaccent(UPPER($1)))
+                  AND u.sigla = UPPER($2)
                 LIMIT 1
             `;
             params = [nomeOriginal, ufOriginal];
@@ -93,22 +110,25 @@ async function resolveMunicipio(codigoIbge, nomeOriginal, ufOriginal) {
         
         if (rows.length > 0) {
             return {
-                nome: rows[0].nome.toUpperCase(),
-                uf: rows[0].uf
+                nome: normalizeText(rows[0].nome),
+                uf: rows[0].uf,
+                codigo_ibge: rows[0].codigo_ibge
             };
         }
         
         // Se ainda não encontrou, retorna os valores originais tratados
-        console.log(`${getTimestamp()} ℹ️ Município não encontrado no BD: ${nomeOriginal} (${codigoIbge}) - Mantendo original.`);
+        console.log(`${getTimestamp()} ℹ️ Município não encontrado no BD: ${nomeOriginal} (${codigoIbge}) - Mantendo original normalizado.`);
         return {
-            nome: nomeOriginal ? nomeOriginal.toUpperCase().trim() : nomeOriginal,
-            uf: ufOriginal ? ufOriginal.toUpperCase().trim() : ufOriginal
+            nome: normalizeText(nomeOriginal),
+            uf: ufOriginal ? ufOriginal.toUpperCase().trim() : ufOriginal,
+            codigo_ibge: codigoIbge
         };
     } catch (error) {
         console.error(`${getTimestamp()} ⚠️ Erro ao resolver município:`, error.message);
         return {
-            nome: nomeOriginal ? nomeOriginal.toUpperCase().trim() : nomeOriginal,
-            uf: ufOriginal ? ufOriginal.toUpperCase().trim() : ufOriginal
+            nome: normalizeText(nomeOriginal),
+            uf: ufOriginal ? ufOriginal.toUpperCase().trim() : ufOriginal,
+            codigo_ibge: codigoIbge
         };
     }
 }
@@ -1685,27 +1705,18 @@ app.post('/api/incluir-manual', async (req, res) => {
         const razaoSocial = String(vendedor.razao_social || 'FORNECEDOR MANUAL').substring(0, 100);
         const nomeFantasia = String(vendedor.nome_fantasia || vendedor.razao_social || 'FORNECEDOR MANUAL').substring(0, 100);
 
-        // 1. RECUPERAR CÓDIGO IBGE SE NÃO INFORMADO
-        let codigoIbgeFinal = vendedor.codigo_municipio ? String(vendedor.codigo_municipio).replace(/\D/g, '') : null;
-        
-        if (!codigoIbgeFinal && vendedor.municipio && vendedor.uf) {
-            try {
-                const resMun = await client.query(
-                    `SELECT m.codigo_ibge 
-                     FROM municipios m
-                     JOIN ufs u ON m.codigo_uf = u.codigo_uf
-                     WHERE UPPER(m.nome) = UPPER($1)
-                       AND u.sigla = UPPER($2)
-                     LIMIT 1`,
-                    [vendedor.municipio, vendedor.uf]
-                );
-                if (resMun.rows.length > 0) {
-                    codigoIbgeFinal = resMun.rows[0].codigo_ibge;
-                    console.log(`${getTimestamp()} 📍 Código IBGE recuperado via DB: ${codigoIbgeFinal}`);
-                }
-            } catch (e) {
-                console.warn(`${getTimestamp()} ⚠️ Falha ao buscar IBGE automático:`, e.message);
-            }
+        // 1. RESOLVER E NORMALIZAR MUNICÍPIO
+        const resolvedMun = await resolveMunicipio(
+            vendedor.codigo_municipio,
+            vendedor.municipio,
+            vendedor.uf
+        );
+        const municipioFinal = resolvedMun.nome;
+        const ufFinal = resolvedMun.uf;
+        const codigoIbgeFinal = resolvedMun.codigo_ibge;
+
+        if (codigoIbgeFinal) {
+            console.log(`${getTimestamp()} 📍 Município resolvido: ${municipioFinal} (${codigoIbgeFinal})`);
         }
 
         // 2. INSERIR/OBTER EMITENTE (Fornecedor informado)
@@ -1726,7 +1737,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                 [
                     razaoSocial, nomeFantasia, vendedor.telefone || null,
                     vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null,
-                    vendedor.bairro || null, vendedor.municipio || null, codigoIbgeFinal, vendedor.uf || null, (vendedor.cep || '').replace(/\D/g, ''),
+                    vendedor.bairro || null, municipioFinal, codigoIbgeFinal, ufFinal, (vendedor.cep || '').replace(/\D/g, ''),
                     idEmitenteInt
                 ]
             );
@@ -1741,7 +1752,7 @@ app.post('/api/incluir-manual', async (req, res) => {
                 [
                     cnpjLimpo, razaoSocial, nomeFantasia, vendedor.telefone || null,
                     vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null,
-                    vendedor.bairro || null, vendedor.municipio || null, codigoIbgeFinal, vendedor.uf || null, (vendedor.cep || '').replace(/\D/g, '')
+                    vendedor.bairro || null, municipioFinal, codigoIbgeFinal, ufFinal, (vendedor.cep || '').replace(/\D/g, '')
                 ]
             );
             idEmitenteInt = result.rows[0].id;
