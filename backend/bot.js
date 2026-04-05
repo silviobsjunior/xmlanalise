@@ -38,14 +38,14 @@ const getMenuKeyboard = (chatId) => {
         ? `${process.env.RENDER_EXTERNAL_URL}/scanner.html`
         : 'https://xmlanalise-node.onrender.com/scanner.html';
         
+    const session = userSessions[chatId] || {};
+    const cityText = session.cidade ? `📍 Cidade: ${session.cidade}` : "📍 Definir Cidade";
+
     const keyboard = [
         [{ text: "🔍 Nova Busca" }, { text: "📷 Abrir Scanner", web_app: { url: miniAppUrl } }],
+        [{ text: cityText }, { text: "🧹 Limpar Tudo" }],
         [{ text: "❓ Ajuda" }]
     ];
-
-    if (userSessions[chatId] && userSessions[chatId].cidade) {
-        keyboard.push([{ text: `📍 Trocar Cidade (${userSessions[chatId].cidade})` }]);
-    }
 
     return {
         reply_markup: {
@@ -81,13 +81,18 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "Digite o nome do produto ou o código de barras:");
     }
 
-    if (text && text.startsWith("📍 Trocar Cidade")) {
+    if (text && text.startsWith("📍 Cidade:")) {
         if (userSessions[chatId]) userSessions[chatId].cidade = null;
         return bot.sendMessage(chatId, "📍 Cidade removida. Informe a nova cidade na próxima busca.", getMenuKeyboard(chatId));
     }
 
+    if (text === "🧹 Limpar Tudo") {
+        delete userSessions[chatId];
+        return bot.sendMessage(chatId, "✨ Histórico e filtros limpos. Como posso ajudar?", getMenuKeyboard(chatId));
+    }
+
     if (text === "❓ Ajuda") {
-        return bot.sendMessage(chatId, "💡 *Dicas:*\n- Busque pelo nome do produto (ex: 'Arroz') ou pelo código de barras.\n- Use o Scanner para ler o código direto da embalagem.\n- Filtre pela cidade para encontrar o melhor preço perto de você.", { parse_mode: 'Markdown' });
+        return bot.sendMessage(chatId, "💡 *Dicas:*\n- Busque pelo nome do produto (ex: 'Arroz') ou pelo código de barras.\n- Use o Scanner para ler o código direto da embalagem.\n- Filtre pela cidade para encontrar o melhor preço perto de você.\n- 'Limpar Tudo' reseta sua cidade e busca atual.", { parse_mode: 'Markdown' });
     }
 
     if (msg.location) {
@@ -148,9 +153,9 @@ async function handleSearchInput(chatId, input) {
         reply_markup: {
             keyboard: [
                 [{ text: "📍 Enviar Localização", request_location: true }],
+                [{ text: "🔍 Nova Busca" }, { text: "🧹 Limpar Tudo" }],
                 [{ text: "Pular Filtro" }]
             ],
-            one_time_keyboard: true,
             resize_keyboard: true
         }
     });
@@ -175,9 +180,15 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
         let whereSql = '';
         
         let sqlTermo = 'TRUE';
-        // Busca flexível como a do site, tratando termo e EAN da mesma forma (ILIKE)
-        params.push(`%${query}%`);
-        sqlTermo = `(p.descricao ILIKE $${params.length} OR p.codigo_barras ILIKE $${params.length})`;
+        if (query) {
+            const words = query.trim().split(/\s+/);
+            const termoConditions = [];
+            words.forEach(word => {
+                params.push(`%${word}%`);
+                termoConditions.push(`(p.descricao ILIKE $${params.length} OR p.codigo_barras ILIKE $${params.length} OR p.ncm ILIKE $${params.length})`);
+            });
+            sqlTermo = `(${termoConditions.join(' AND ')})`;
+        }
 
         let filtroLoc = '';
         if (cidade) {
@@ -185,10 +196,10 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
             filtroLoc = ` AND e.municipio ILIKE $${params.length}`;
         }
 
-        // QUERY IDENTICA AO SITE (UNION ALL)
+        // QUERY IDENTICA AO SITE (UNION ALL) com NCM
         const queryStr = `
             -- PARTE 1: PERSPECTIVAS 'emitente' OU 'consumidor' -> EXIBE APENAS O EMITENTE
-            SELECT p.descricao, p.valor_unitario, p.codigo_barras,
+            SELECT p.descricao, p.codigo_barras, p.ncm,
                    e.cnpj AS vendedor_cnpj, e.razao_social AS vendedor_razao_social,
                    e.nome_fantasia AS vendedor_nome_fantasia,
                    e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
@@ -207,7 +218,7 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
             UNION ALL
 
             -- PARTE 2A: PERSPECTIVA 'revendedor' (Emitente)
-            SELECT p.descricao, p.valor_unitario, p.codigo_barras,
+            SELECT p.descricao, p.codigo_barras, p.ncm,
                    e.cnpj AS vendedor_cnpj, e.razao_social AS vendedor_razao_social,
                    e.nome_fantasia AS vendedor_nome_fantasia,
                    e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
@@ -226,7 +237,7 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
             UNION ALL
 
             -- PARTE 2B: PERSPECTIVA 'revendedor' (Destinatário)
-            SELECT p.descricao, p.valor_unitario, p.codigo_barras,
+            SELECT p.descricao, p.codigo_barras, p.ncm,
                    d.cnpj AS vendedor_cnpj, d.razao_social AS vendedor_razao_social,
                    NULL AS vendedor_nome_fantasia,
                    d.logradouro AS vendedor_logradouro, d.numero AS vendedor_numero,
@@ -261,12 +272,11 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
         userSessions[chatId].cidade = cidade || userSessions[chatId].cidade;
 
         for (const r of rows) {
-            const preco = r.valor_unitario ? parseFloat(r.valor_unitario).toFixed(2) : '0.00';
             const loja = r.vendedor_nome_fantasia || r.vendedor_razao_social || 'Loja';
             const endereco = `${r.vendedor_logradouro || ''}, ${r.vendedor_numero || ''} - ${r.vendedor_bairro || ''}, ${r.vendedor_cidade || ''}/${r.vendedor_uf || ''}`;
             const encodedAddr = encodeURIComponent(endereco);
 
-            const msgText = `📦 *${r.descricao}*\n💰 R$ ${preco}\n🏪 ${loja}\n📍 ${r.vendedor_cidade}\n🏠 _${endereco}_\n🗓️ _Visto em: ${new Date(r.data_emissao).toLocaleDateString('pt-BR')}_`;
+            const msgText = `📦 *${r.descricao}*\n🆔 EAN: \`${r.codigo_barras || 'N/A'}\` | NCM: \`${r.ncm || 'N/A'}\`\n🏪 ${loja}\n📍 ${r.vendedor_cidade}\n🏠 _${endereco}_\n🗓️ _Visto em: ${new Date(r.data_emissao).toLocaleDateString('pt-BR')}_`;
 
             const inline_keyboard = [[
                 { text: "🚗 Waze", url: `https://waze.com/ul?q=${encodedAddr}` },
