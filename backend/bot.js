@@ -25,6 +25,70 @@ const pool = new Pool({
 // { 1234567: { ean: '7891234', cidade: 'JALES', bairro: 'CENTRO', step: '' } }
 const userSessions = {};
 
+// Função para normalizar texto (MAIÚSCULO e SEM ACENTOS)
+function normalizeText(text) {
+    if (!text) return text;
+    return text
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+        .replace(/[^a-zA-Z0-9\s]/g, ' ') // Remove caracteres especiais
+        .toUpperCase()
+        .trim()
+        .replace(/\s+/g, ' '); // Remove espaços duplos
+}
+
+// Função para buscar cidade/município no banco (similar à do index.js)
+async function resolveMunicipio(nomeOriginal) {
+    if (!nomeOriginal) return { nome: null, uf: null };
+    const nomeNorm = normalizeText(nomeOriginal);
+    console.log(`[BOT] Resolvendo município: ${nomeOriginal} -> ${nomeNorm}`);
+    
+    try {
+        const query = `
+            SELECT m.nome, u.sigla as uf
+            FROM municipios m
+            JOIN ufs u ON m.codigo_uf = u.codigo_uf
+            WHERE unaccent(UPPER(m.nome)) = unaccent(UPPER($1))
+               OR unaccent(UPPER(m.nome)) % unaccent(UPPER($1))
+            ORDER BY similarity(unaccent(UPPER(m.nome)), unaccent(UPPER($1))) DESC
+            LIMIT 1
+        `;
+        const { rows } = await pool.query(query, [nomeNorm]);
+        if (rows.length > 0) {
+            console.log(`[BOT] Município encontrado: ${rows[0].nome} (${rows[0].uf})`);
+            return { nome: normalizeText(rows[0].nome), uf: rows[0].uf };
+        }
+        console.log(`[BOT] Município NÃO encontrado no banco, usando normalizado.`);
+        return { nome: nomeNorm, uf: null };
+    } catch (err) {
+        console.warn("Erro ao resolver município no bot:", err.message);
+        return { nome: nomeNorm, uf: null };
+    }
+}
+
+// Função para Reverse Geocoding usando Nominatim (OpenStreetMap)
+async function reverseGeocode(lat, lon) {
+    try {
+        const axios = require('axios');
+        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': 'AquiTemBot/1.0 (xmlAnalise Projeto)' }
+        });
+
+        const addr = response.data.address;
+        if (!addr) return null;
+
+        return {
+            cidade: addr.city || addr.town || addr.village || addr.municipality || null,
+            bairro: addr.suburb || addr.neighbourhood || addr.city_district || null,
+            uf: addr.state_code || (addr.state ? addr.state.substring(0, 2).toUpperCase() : null)
+        };
+    } catch (err) {
+        console.error("Erro no Reverse Geocode:", err.message);
+        return null;
+    }
+}
+
 // Comando de entrada do Bot
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -45,16 +109,17 @@ bot.onText(/\/start/, (msg) => {
 // Comandos de Filtro
 bot.onText(/\/cidade(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const cidade = match[1];
+    const cidadeInput = match[1];
 
     if (!userSessions[chatId] || !userSessions[chatId].ean) {
         return bot.sendMessage(chatId, "❌ Primeiro, informe o EAN do produto (digite ou use o scanner).");
     }
 
-    if (cidade) {
-        userSessions[chatId].cidade = cidade.trim();
+    if (cidadeInput) {
+        const res = await resolveMunicipio(cidadeInput);
+        userSessions[chatId].cidade = res.nome;
         userSessions[chatId].step = '';
-        bot.sendMessage(chatId, `🏙️ Filtrando por cidade: *${userSessions[chatId].cidade}*...`, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, `🏙️ Cidade resolvida: *${res.nome}${res.uf ? ' - ' + res.uf : ''}*\nBuscando produtos...`, { parse_mode: 'Markdown' });
         await performProductSearch(chatId);
     } else {
         userSessions[chatId].step = 'waiting_city';
@@ -64,16 +129,16 @@ bot.onText(/\/cidade(?:\s+(.+))?/, async (msg, match) => {
 
 bot.onText(/\/bairro(?:\s+(.+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const bairro = match[1];
+    const bairroInput = match[1];
 
     if (!userSessions[chatId] || !userSessions[chatId].ean) {
         return bot.sendMessage(chatId, "❌ Primeiro, informe o EAN do produto.");
     }
 
-    if (bairro) {
-        userSessions[chatId].bairro = bairro.trim();
+    if (bairroInput) {
+        userSessions[chatId].bairro = normalizeText(bairroInput);
         userSessions[chatId].step = '';
-        bot.sendMessage(chatId, `📍 Filtrando por bairro: *${userSessions[chatId].bairro}*...`, { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, `📍 Bairro: *${userSessions[chatId].bairro}*\nBuscando produtos...`, { parse_mode: 'Markdown' });
         await performProductSearch(chatId);
     } else {
         userSessions[chatId].step = 'waiting_neighborhood';
@@ -109,8 +174,24 @@ bot.on('message', async (msg) => {
 
     if (msg.location) {
         if (userSessions[chatId] && userSessions[chatId].ean) {
-            bot.sendMessage(chatId, "📍 Localização GPS recebida. (Funcionalidade de cidade automática em desenvolvimento). Buscando globalmente por enquanto...");
+            bot.sendMessage(chatId, "📍 Recebendo localização... Processando coordenadas via GPS 🛰️");
+            const geo = await reverseGeocode(msg.location.latitude, msg.location.longitude);
+            
+            if (geo && geo.cidade) {
+                const res = await resolveMunicipio(geo.cidade);
+                userSessions[chatId].cidade = res.nome;
+                userSessions[chatId].bairro = geo.bairro ? normalizeText(geo.bairro) : null;
+                
+                let info = `✅ Localizamos você em:\n🏙️ *${res.nome}${res.uf ? ' - ' + res.uf : ''}*`;
+                if (geo.bairro) info += `\n📍 Bairro: *${geo.bairro}*`;
+                
+                bot.sendMessage(chatId, info + "\n\nBuscando produtos nesta região...", { parse_mode: 'Markdown' });
+            } else {
+                bot.sendMessage(chatId, "⚠️ Não conseguimos identificar sua cidade via GPS. Tente digitar usando /cidade.");
+            }
             await performProductSearch(chatId);
+        } else {
+            bot.sendMessage(chatId, "❌ Primeiro informe o EAN do produto, depois mande a localização.");
         }
         return;
     }
@@ -125,16 +206,19 @@ bot.on('message', async (msg) => {
             return await performProductSearch(chatId);
         }
 
-        // Se estávamos esperando entrada de texto para cidade/bairro após comando sem parâmetro
+        // Se estáavamo esperando entrada de texto para cidade/bairro após comando sem parâmetro
         if (session) {
             if (session.step === 'waiting_city') {
-                session.cidade = text.trim();
+                const res = await resolveMunicipio(text.trim());
+                session.cidade = res.nome;
                 session.step = '';
+                bot.sendMessage(chatId, `🏙️ Cidade resolvida: *${res.nome}*`, { parse_mode: 'Markdown' });
                 return await performProductSearch(chatId);
             }
             if (session.step === 'waiting_neighborhood') {
-                session.bairro = text.trim();
+                session.bairro = normalizeText(text.trim());
                 session.step = '';
+                bot.sendMessage(chatId, `📍 Bairro: *${session.bairro}*`, { parse_mode: 'Markdown' });
                 return await performProductSearch(chatId);
             }
         }
@@ -147,6 +231,10 @@ bot.on('message', async (msg) => {
 
 async function initializeBotTables() {
     try {
+        // Habilitar extensões necessárias para busca por semelhança e acentuação
+        await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm;`);
+        await pool.query(`CREATE EXTENSION IF NOT EXISTS unaccent;`);
+
         const sql = `
         CREATE TABLE IF NOT EXISTS itens_monitorados (
             id SERIAL PRIMARY KEY,
@@ -206,15 +294,21 @@ async function performProductSearch(chatId) {
         let paramIndex = 2;
 
         if (cidade) {
-            params.push(cidade.toUpperCase());
-            params.push(`%${cidade.toUpperCase()}%`);
-            query += ` AND (UPPER(e.municipio) = $${paramIndex} OR UPPER(e.municipio) LIKE $${paramIndex + 1})`;
-            paramIndex += 2;
+            params.push(cidade);
+            query += ` AND (
+                unaccent(UPPER(e.municipio)) = unaccent(UPPER($${paramIndex})) 
+                OR similarity(unaccent(UPPER(e.municipio)), unaccent(UPPER($${paramIndex}))) > 0.4
+            )`;
+            paramIndex++;
         }
 
         if (bairro) {
-            params.push(`%${bairro.toUpperCase()}%`);
-            query += ` AND UPPER(e.bairro) LIKE $${paramIndex}`;
+            params.push(bairro);
+            query += ` AND (
+                unaccent(UPPER(e.bairro)) = unaccent(UPPER($${paramIndex})) 
+                OR unaccent(UPPER(e.bairro)) LIKE '%' || unaccent(UPPER($${paramIndex})) || '%'
+                OR similarity(unaccent(UPPER(e.bairro)), unaccent(UPPER($${paramIndex}))) > 0.3
+            )`;
             paramIndex++;
         }
         
