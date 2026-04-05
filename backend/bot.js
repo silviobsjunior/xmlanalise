@@ -5,399 +5,249 @@ require('dotenv').config();
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 
-// Verifica se o token foi configurado para evitar crashes (importante para o Render)
 if (!token || token.includes('SEU_TOKEN_AQUI')) {
     console.warn('TELEGRAM_BOT_TOKEN não configurado corretamente. O bot do Telegram não será iniciado.');
     module.exports = null;
     return;
 }
 
-// Inicializar bot em modo Polling.
 const bot = new TelegramBot(token, { polling: true });
 
-// Pool do banco PostgreSQL
 const pool = new Pool({
     connectionString: process.env.POSTGRES_URL,
     ssl: { rejectUnauthorized: false }
 });
 
-// Mapa em memória para guardar o estado da conversa e sessão dos usuários
-// { 1234567: { ean: '7891234', cidade: 'JALES', bairro: 'CENTRO', step: '' } }
 const userSessions = {};
 
-// Função para normalizar texto (MAIÚSCULO e SEM ACENTOS)
-function normalizeText(text) {
-    if (!text) return text;
-    return text
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-        .replace(/[^a-zA-Z0-9\s]/g, ' ') // Remove caracteres especiais
-        .toUpperCase()
-        .trim()
-        .replace(/\s+/g, ' '); // Remove espaços duplos
-}
-
-// Função para buscar cidade/município no banco (similar à do index.js)
-async function resolveMunicipio(nomeOriginal) {
-    if (!nomeOriginal) return { nome: null, uf: null };
-    const nomeNorm = normalizeText(nomeOriginal);
-    console.log(`[BOT] Resolvendo município: ${nomeOriginal} -> ${nomeNorm}`);
-    
-    try {
-        const query = `
-            SELECT m.nome, u.sigla as uf
-            FROM municipios m
-            JOIN ufs u ON m.codigo_uf = u.codigo_uf
-            WHERE unaccent(UPPER(m.nome)) = unaccent(UPPER($1))
-               OR unaccent(UPPER(m.nome)) % unaccent(UPPER($1))
-            ORDER BY similarity(unaccent(UPPER(m.nome)), unaccent(UPPER($1))) DESC
-            LIMIT 1
-        `;
-        const { rows } = await pool.query(query, [nomeNorm]);
-        if (rows.length > 0) {
-            console.log(`[BOT] Município encontrado: ${rows[0].nome} (${rows[0].uf})`);
-            return { nome: normalizeText(rows[0].nome), uf: rows[0].uf };
-        }
-        console.log(`[BOT] Município NÃO encontrado no banco, usando normalizado.`);
-        return { nome: nomeNorm, uf: null };
-    } catch (err) {
-        console.warn("Erro ao resolver município no bot:", err.message);
-        return { nome: nomeNorm, uf: null };
+const mainKeyboard = {
+    reply_markup: {
+        keyboard: [
+            [{ text: "🔍 Nova Busca" }, { text: "📷 Abrir Scanner" }],
+            [{ text: "❓ Ajuda" }]
+        ],
+        resize_keyboard: true
     }
-}
+};
 
-// Função para Reverse Geocoding usando Nominatim (OpenStreetMap)
-async function reverseGeocode(lat, lon) {
-    try {
-        const axios = require('axios');
-        const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
-        const response = await axios.get(url, {
-            headers: { 'User-Agent': 'AquiTemBot/1.0 (xmlAnalise Projeto)' }
-        });
-
-        const addr = response.data.address;
-        if (!addr) return null;
-
-        return {
-            cidade: addr.city || addr.town || addr.village || addr.municipality || null,
-            bairro: addr.suburb || addr.neighbourhood || addr.city_district || null,
-            uf: addr.state_code || (addr.state ? addr.state.substring(0, 2).toUpperCase() : null)
-        };
-    } catch (err) {
-        console.error("Erro no Reverse Geocode:", err.message);
-        return null;
-    }
-}
-
-// Comando de entrada do Bot
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    const miniAppUrl = process.env.RENDER_EXTERNAL_URL
-        ? `${process.env.RENDER_EXTERNAL_URL}/scanner.html`
-        : 'https://xmlanalise-node.onrender.com/scanner.html';
-
-    bot.sendMessage(chatId, "👋 Olá! Eu sou o *Aqui Tem Bot*.\n\nPara buscar um produto:\n1. **Digite** o Código de Barras (EAN).\n2. **Use o Scanner** no botão abaixo.\n\nApós a busca, você pode filtrar usando:\n🏙️ `/cidade [nome]`\n📍 `/bairro [nome]`\n🌎 `/global` (limpar filtros)", {
+    delete userSessions[chatId];
+    bot.sendMessage(chatId, "👋 Olá! Bem-vindo ao *Aqui Tem Bot*.\n\nEscolha uma opção no menu abaixo ou simplesmente:\n1. *Digite o nome do produto*\n2. *Digite o EAN*\n3. *Use o Scanner*", {
         parse_mode: 'Markdown',
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: "📷 Abrir Scanner de Código de Barras", web_app: { url: miniAppUrl } }]
-            ]
-        }
+        ...mainKeyboard
     });
 });
 
-// Comandos de Filtro
-bot.onText(/\/cidade(?:\s+(.+))?/, async (msg, match) => {
+bot.onText(/\/reset/, (msg) => {
     const chatId = msg.chat.id;
-    const cidadeInput = match[1];
-
-    if (!userSessions[chatId] || !userSessions[chatId].ean) {
-        return bot.sendMessage(chatId, "❌ Primeiro, informe o EAN do produto (digite ou use o scanner).");
-    }
-
-    if (cidadeInput) {
-        const res = await resolveMunicipio(cidadeInput);
-        userSessions[chatId].cidade = res.nome;
-        userSessions[chatId].step = '';
-        bot.sendMessage(chatId, `🏙️ Cidade resolvida: *${res.nome}${res.uf ? ' - ' + res.uf : ''}*\nBuscando produtos...`, { parse_mode: 'Markdown' });
-        await performProductSearch(chatId);
-    } else {
-        userSessions[chatId].step = 'waiting_city';
-        bot.sendMessage(chatId, "🏙️ Por favor, digite o nome da **cidade** para filtrar:");
-    }
+    delete userSessions[chatId];
+    bot.sendMessage(chatId, "🔄 Busca reiniciada. O que você deseja procurar agora?", mainKeyboard);
 });
 
-bot.onText(/\/bairro(?:\s+(.+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const bairroInput = match[1];
-
-    if (!userSessions[chatId] || !userSessions[chatId].ean) {
-        return bot.sendMessage(chatId, "❌ Primeiro, informe o EAN do produto.");
-    }
-
-    if (bairroInput) {
-        userSessions[chatId].bairro = normalizeText(bairroInput);
-        userSessions[chatId].step = '';
-        bot.sendMessage(chatId, `📍 Bairro: *${userSessions[chatId].bairro}*\nBuscando produtos...`, { parse_mode: 'Markdown' });
-        await performProductSearch(chatId);
-    } else {
-        userSessions[chatId].step = 'waiting_neighborhood';
-        bot.sendMessage(chatId, "📍 Por favor, digite o nome do **bairro** para filtrar:");
-    }
-});
-
-bot.onText(/\/global/, async (msg) => {
-    const chatId = msg.chat.id;
-    if (userSessions[chatId]) {
-        userSessions[chatId].cidade = null;
-        userSessions[chatId].bairro = null;
-        userSessions[chatId].step = '';
-        bot.sendMessage(chatId, "🌎 Removendo filtros. Buscando em todas as regiões...");
-        await performProductSearch(chatId);
-    }
-});
-
-// Botão Recebido do MiniApp web_app_data
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
+    if (!text) return;
+
+    if (text === "🔍 Nova Busca") {
+        delete userSessions[chatId];
+        return bot.sendMessage(chatId, "Digite o nome do produto ou o código de barras:");
+    }
+
+    if (text === "📷 Abrir Scanner") {
+        const miniAppUrl = process.env.RENDER_EXTERNAL_URL
+            ? `${process.env.RENDER_EXTERNAL_URL}/scanner.html`
+            : 'https://xml-analise.onrender.com/scanner.html';
+        return bot.sendMessage(chatId, "Clique abaixo para escanear:", {
+            reply_markup: {
+                inline_keyboard: [[{ text: "📷 Abrir Scanner", web_app: { url: miniAppUrl } }]]
+            }
+        });
+    }
+
+    if (text === "❓ Ajuda") {
+        return bot.sendMessage(chatId, "💡 *Dicas:*\n- Busque por nome ou EAN.\n- Você pode filtrar por sua cidade.\n- Use as direções no Maps/Waze.", { parse_mode: 'Markdown' });
+    }
+
     if (msg.web_app_data) {
-        const scannerData = msg.web_app_data.data;
-        if (/^\d{8,14}$/.test(scannerData)) {
-            userSessions[chatId] = { ean: scannerData, step: '' };
-            bot.sendMessage(chatId, `✅ EAN lido: *${scannerData}*\nBuscando em todas as regiões...`, { parse_mode: 'Markdown' });
-            await performProductSearch(chatId);
-        }
+        handleSearchInput(chatId, msg.web_app_data.data);
         return;
     }
 
     if (msg.location) {
-        if (userSessions[chatId] && userSessions[chatId].ean) {
-            bot.sendMessage(chatId, "📍 Recebendo localização... Processando coordenadas via GPS 🛰️");
-            const geo = await reverseGeocode(msg.location.latitude, msg.location.longitude);
-            
-            if (geo && geo.cidade) {
-                const res = await resolveMunicipio(geo.cidade);
-                userSessions[chatId].cidade = res.nome;
-                userSessions[chatId].bairro = geo.bairro ? normalizeText(geo.bairro) : null;
-                
-                let info = `✅ Localizamos você em:\n🏙️ *${res.nome}${res.uf ? ' - ' + res.uf : ''}*`;
-                if (geo.bairro) info += `\n📍 Bairro: *${geo.bairro}*`;
-                
-                bot.sendMessage(chatId, info + "\n\nBuscando produtos nesta região...", { parse_mode: 'Markdown' });
-            } else {
-                bot.sendMessage(chatId, "⚠️ Não conseguimos identificar sua cidade via GPS. Tente digitar usando /cidade.");
-            }
-            await performProductSearch(chatId);
-        } else {
-            bot.sendMessage(chatId, "❌ Primeiro informe o EAN do produto, depois mande a localização.");
+        let session = userSessions[chatId];
+        if (session && session.step === 'waiting_location_or_city') {
+            bot.sendMessage(chatId, `📍 Localização recebida. Buscando *${session.query}*...`);
+            await performProductSearch(chatId, session.query, session.isEan, "", 0);
+            return;
         }
-        return;
     }
 
-    if (text && !text.startsWith('/')) {
+    if (!text.startsWith('/')) {
         let session = userSessions[chatId];
 
-        // Se o usuário digitou um EAN novo
-        if (/^\d{8,14}$/.test(text.trim())) {
-            userSessions[chatId] = { ean: text.trim(), step: '' };
-            bot.sendMessage(chatId, `🔎 Buscando EAN *${text.trim()}*...`, { parse_mode: 'Markdown' });
-            return await performProductSearch(chatId);
+        if (session && session.step === 'waiting_location_or_city') {
+            const input = text.toUpperCase().trim();
+            if (input === "PULAR FILTRO" || input === "PULAR") {
+                await performProductSearch(chatId, session.query, session.isEan, "", 0);
+            } else {
+                await performProductSearch(chatId, session.query, session.isEan, input, 0);
+            }
+            return;
         }
 
-        // Se estáavamo esperando entrada de texto para cidade/bairro após comando sem parâmetro
-        if (session) {
-            if (session.step === 'waiting_city') {
-                const res = await resolveMunicipio(text.trim());
-                session.cidade = res.nome;
-                session.step = '';
-                bot.sendMessage(chatId, `🏙️ Cidade resolvida: *${res.nome}*`, { parse_mode: 'Markdown' });
-                return await performProductSearch(chatId);
-            }
-            if (session.step === 'waiting_neighborhood') {
-                session.bairro = normalizeText(text.trim());
-                session.step = '';
-                bot.sendMessage(chatId, `📍 Bairro: *${session.bairro}*`, { parse_mode: 'Markdown' });
-                return await performProductSearch(chatId);
-            }
-        }
-
-        if (!session || !session.ean) {
-            bot.sendMessage(chatId, "❓ Para começar, digite o Código de Barras (EAN) ou use /start.");
-        }
+        handleSearchInput(chatId, text);
     }
 });
 
-async function initializeBotTables() {
-    try {
-        // Habilitar extensões necessárias para busca por semelhança e acentuação
-        await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm;`);
-        await pool.query(`CREATE EXTENSION IF NOT EXISTS unaccent;`);
+bot.on('callback_query', async (callbackQuery) => {
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
 
-        const sql = `
-        CREATE TABLE IF NOT EXISTS itens_monitorados (
-            id SERIAL PRIMARY KEY,
-            termo_chave VARCHAR(255) NOT NULL UNIQUE,
-            ativo BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS sugestoes_contextuais (
-            id SERIAL PRIMARY KEY,
-            item_monitorado_id INTEGER REFERENCES itens_monitorados(id) ON DELETE CASCADE,
-            titulo_popup VARCHAR(255) NOT NULL,
-            conteudo_json JSONB NOT NULL,
-            icone_id VARCHAR(50),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS logs_estatisticos_pesquisa (
-            id SERIAL PRIMARY KEY,
-            timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            termo_pesquisado VARCHAR(255) NOT NULL,
-            exibiu_alerta BOOLEAN DEFAULT FALSE,
-            clicou_alerta BOOLEAN DEFAULT FALSE,
-            id_usuario_sessao VARCHAR(255)
-        );
-        INSERT INTO itens_monitorados (termo_chave) VALUES ('FARINHA DE TRIGO'), ('LEITE'), ('ARROZ'), ('PAO') ON CONFLICT (termo_chave) DO NOTHING;
-        `;
-        await pool.query(sql);
-    } catch (err) {
-        console.warn("⚠️ [BOT] Erro ao criar tabelas.", err.message);
+    if (data === 'ver_mais') {
+        const session = userSessions[chatId];
+        if (session && session.query) {
+            session.offset = (session.offset || 0) + 5;
+            await performProductSearch(chatId, session.query, session.isEan, session.cidade, session.offset);
+        } else {
+            bot.sendMessage(chatId, "Sua sessão expirou. Por favor, inicie uma nova busca.");
+        }
     }
+
+    bot.answerCallbackQuery(callbackQuery.id);
+});
+
+async function handleSearchInput(chatId, input) {
+    const isEan = /^\d{8,14}$/.test(input.trim());
+    userSessions[chatId] = { 
+        step: 'waiting_location_or_city', 
+        query: input.trim(),
+        isEan: isEan,
+        offset: 0
+    };
+
+    bot.sendMessage(chatId, `✅ Identificado: ${isEan ? "EAN" : "Produto"} *${input.trim()}*.\n\nDeseja filtrar por **Cidade**? Envie sua localização GPS ou digite o nome da cidade (ou clique em "Pular").`, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            keyboard: [
+                [{ text: "📍 Enviar Localização", request_location: true }],
+                [{ text: "Pular Filtro" }]
+            ],
+            one_time_keyboard: true,
+            resize_keyboard: true
+        }
+    });
 }
 
-initializeBotTables();
-
-async function performProductSearch(chatId) {
-    const session = userSessions[chatId];
-    if (!session || !session.ean) return;
-
-    const { ean, cidade, bairro } = session;
-
+async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
     try {
-        let query = `
-            SELECT p.codigo_barras AS cean, p.descricao, p.ncm,
-                   e.cnpj, e.razao_social, e.nome_fantasia,
-                   e.bairro, e.municipio, e.uf, e.telefone,
-                   nf.data_emissao
-            FROM produtos_nfe p
-            JOIN nfe_importadas ni ON p.nfe_id = ni.id
-            JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
-            JOIN atores a          ON nf.emitente_id = a.id
-            JOIN emitentes e       ON a.identificador = e.cnpj
-            WHERE e.cnpj IS NOT NULL
-              AND e.cnpj ~ '^[0-9]{14}$'
-              AND p.codigo_barras = $1
-        `;
-        
-        const params = [ean];
-        let paramIndex = 2;
+        const limit = 5;
+        let params = [];
+        let whereClauses = [];
+
+        if (isEan) {
+            whereClauses.push(`p.codigo_barras = $${params.length + 1}`);
+            params.push(query);
+        } else {
+            whereClauses.push(`p.descricao ILIKE $${params.length + 1}`);
+            params.push(`%${query}%`);
+        }
 
         if (cidade) {
-            params.push(cidade);
-            query += ` AND (
-                unaccent(UPPER(e.municipio)) = unaccent(UPPER($${paramIndex})) 
-                OR similarity(unaccent(UPPER(e.municipio)), unaccent(UPPER($${paramIndex}))) > 0.4
-            )`;
-            paramIndex++;
+            whereClauses.push(`e.municipio ILIKE $${params.length + 1}`);
+            params.push(`%${cidade}%`);
         }
 
-        if (bairro) {
-            params.push(bairro);
-            query += ` AND (
-                unaccent(UPPER(e.bairro)) = unaccent(UPPER($${paramIndex})) 
-                OR unaccent(UPPER(e.bairro)) LIKE '%' || unaccent(UPPER($${paramIndex})) || '%'
-                OR similarity(unaccent(UPPER(e.bairro)), unaccent(UPPER($${paramIndex}))) > 0.3
-            )`;
-            paramIndex++;
-        }
+        const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+        // Contar total
+        const countQuery = `SELECT count(*) FROM produtos_nfe p 
+                            JOIN atores a ON p.emitente_id = a.id
+                            JOIN emitentes e ON a.identificador = e.cnpj
+                            ${whereSql}`;
+        const countRes = await pool.query(countQuery, params);
+        const total = parseInt(countRes.rows[0].count);
+
+        // Buscar páginas
+        const dataQuery = `SELECT p.descricao, p.valor_unitario, e.municipio, e.uf, e.nome as loja,
+                                 e.logradouro, e.numero, e.bairro
+                          FROM produtos_nfe p
+                          JOIN atores a ON p.emitente_id = a.id
+                          JOIN emitentes e ON a.identificador = e.cnpj
+                          ${whereSql}
+                          ORDER BY p.created_at DESC LIMIT ${limit} OFFSET ${offset}`;
         
-        query += ` ORDER BY nf.data_emissao DESC LIMIT 15`;
+        const { rows } = await pool.query(dataQuery, params);
 
-        const { rows } = await pool.query(query, params);
-
-        if (rows.length === 0) {
-            let errorMsg = `❌ Nada encontrado para o EAN *${ean}*`;
-            if (cidade) errorMsg += ` na cidade *${cidade}*`;
-            if (bairro) errorMsg += ` no bairro *${bairro}*`;
-            errorMsg += ".\nTente /global para ver todos ou mudar o filtro.";
-            return bot.sendMessage(chatId, errorMsg, { parse_mode: 'Markdown' });
+        if (rows.length === 0 && offset === 0) {
+            return bot.sendMessage(chatId, `❌ Nenhum resultado para "${query}"${cidade ? ' em ' + cidade : ''}.`, mainKeyboard);
         }
 
-        const vendedoresMap = new Map();
-        let descricaoProduto = '';
-        let ncmProduto = '';
+        // Salvar estado da busca na sessão para paginação
+        userSessions[chatId] = { query, isEan, cidade, offset, step: 'browsing' };
 
-        rows.forEach(row => {
-            if (!descricaoProduto) {
-                descricaoProduto = row.descricao;
-                ncmProduto = row.ncm;
-            }
-            const cnpj = row.cnpj;
-            if (!vendedoresMap.has(cnpj)) {
-                vendedoresMap.set(cnpj, {
-                    nome: row.nome_fantasia || row.razao_social,
-                    bairro: row.bairro,
-                    cidade: row.municipio,
-                    uf: row.uf,
-                    telefone: row.telefone
-                });
-            }
-        });
+        for (const r of rows) {
+            const preco = r.valor_unitario ? parseFloat(r.valor_unitario).toFixed(2) : 'N/A';
+            const logradouro = r.logradouro || '';
+            const numero = r.numero || '';
+            const bairro = r.bairro || '';
+            const municipio = r.municipio || '';
+            const uf = r.uf || '';
+            
+            // Filtra vírgulas sobrando se algum campo estiver nulo
+            const parts = [logradouro, numero, bairro, municipio, uf].filter(p => p && p.trim().length > 0);
+            const fullAddress = parts.join(', ');
+            const encodedAddress = encodeURIComponent(fullAddress);
 
-        let msg = `🔎 *RESULTADOS PENTENTES*\n`;
-        msg += `📦 *Produto:* ${descricaoProduto}\n`;
-        msg += `🔢 *EAN:* \`${ean}\`\n\n`;
-        
-        if (cidade || bairro) {
-            msg += `📍 *Filtros ativos:* ${[cidade, bairro].filter(Boolean).join(' > ')}\n\n`;
+            const msgText = `📦 *${r.descricao}*\n💰 R$ ${preco}\n🏪 ${r.loja}\n📍 ${r.municipio}\n🏠 _${fullAddress}_`;
+
+            const inline_keyboard = [
+                [
+                    { text: "🚗 Waze", url: `https://waze.com/ul?q=${encodedAddress}` },
+                    { text: "🗺️ Google Maps", url: `https://www.google.com/maps/search/?api=1&query=${encodedAddress}` }
+                ]
+            ];
+
+            await bot.sendMessage(chatId, msgText, { 
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard }
+            });
         }
 
-        msg += `🏪 *Vendedores encontrados (${vendedoresMap.size}):*\n`;
-
-        let count = 0;
-        for (const [cnpj, v] of vendedoresMap) {
-            if (count >= 8) {
-                msg += `\n_...e mais ${vendedoresMap.size - 8}_`;
-                break;
-            }
-            msg += `\n• *${v.nome}*`;
-            msg += `\n  📍 ${[v.bairro, v.cidade, v.uf].filter(Boolean).join(', ')}`;
-            if (v.telefone) msg += `\n  📞 ${v.telefone}`;
-            count++;
+        if (total > offset + limit) {
+             bot.sendMessage(chatId, `Exibindo ${offset + 1} a ${offset + rows.length} de *${total}* itens.`, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: "🔽 Ver Mais Resultados", callback_data: "ver_mais" }]]
+                }
+            });
+        } else if (total > 0) {
+            bot.sendMessage(chatId, "✅ Todos os resultados exibidos.", mainKeyboard);
         }
 
-        msg += `\n\n💡 _Dica: Use /cidade, /bairro ou /global para ajustar a busca._`;
-
-        bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
-        await verificarSugestoesCrossSell(chatId, descricaoProduto);
+        if (offset === 0 && rows.length > 0) {
+            await verificarSugestoesCrossSell(chatId, rows[0].descricao);
+        }
 
     } catch (err) {
         console.error("Erro no Bot DB: ", err);
-        bot.sendMessage(chatId, "Ocorreu um erro ao buscar os dados.");
+        bot.sendMessage(chatId, "⚠️ Erro ao consultar banco de dados.");
     }
 }
 
 async function verificarSugestoesCrossSell(chatId, produtoNome) {
-    try {
-        const nomeUpper = produtoNome.toUpperCase();
-        await pool.query( `INSERT INTO logs_estatisticos_pesquisa (termo_pesquisado, id_usuario_sessao) VALUES ($1, $2)`, [nomeUpper, String(chatId)] );
-        const { rows: matches } = await pool.query(`
-            SELECT im.id, im.termo_chave, sc.titulo_popup, sc.conteudo_json 
-            FROM itens_monitorados im
-            JOIN sugestoes_contextuais sc ON im.id = sc.item_monitorado_id
-            WHERE im.ativo = TRUE AND $1 LIKE '%' || im.termo_chave || '%'
-            LIMIT 1
-        `, [nomeUpper]);
-
-        if (matches.length > 0) {
-            const m = matches[0];
-            const itensCrossover = m.conteudo_json.itens ? m.conteudo_json.itens.join(', ') : "Diversos";
-            const msg = `💡 *SUGESTÃO*\n*${m.titulo_popup}*\nRelacionados: _${itensCrossover}_`;
-            bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+    const nomeNormalizado = produtoNome.toLowerCase();
+    const regrasCount = [
+        { regex: /farinha.*trigo/i, msg: "🍕 Que tal uma Pizza? Veja se tem Fermento e Muzzarella." },
+        { regex: /leite/i, msg: "🍰 Hora do bolo? Veja se tem Açúcar e Ovos." }
+    ];
+    for (let regra of regrasCount) {
+        if (regra.regex.test(nomeNormalizado)) {
+            bot.sendMessage(chatId, `💡 *Dica:* ${regra.msg}`, { parse_mode: 'Markdown' });
+            break;
         }
-    } catch (err) {
-        console.error("Erro cross-sell:", err.message);
     }
 }
 
