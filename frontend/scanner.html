@@ -3,22 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aqui Tem - Scanner</title>
+    <title>Aqui Tem - Scanner Nativo</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root {
             --primary: #5c6bc0;
-            --primary-light: #7986cb;
-            --accent: #ff4081;
             --bg: #1a1b2e;
-            --card-bg: #242645;
             --text: #ffffff;
-            --text-dim: #9499c3;
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: sans-serif;
             margin: 0;
             padding: 0;
             background-color: var(--bg);
@@ -28,172 +23,65 @@
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            overflow: hidden;
         }
 
         .container {
-            width: 90%;
-            max-width: 500px;
-            background: var(--card-bg);
-            border-radius: 20px;
-            padding: 24px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+            width: 80%;
             text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        h1 {
-            font-size: 1.5rem;
-            margin-bottom: 8px;
-            background: linear-gradient(135deg, #fff 0%, var(--primary-light) 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        p {
-            color: var(--text-dim);
-            font-size: 0.9rem;
-            margin-bottom: 24px;
-        }
-
-        #reader {
-            width: 100%;
+            padding: 20px;
+            background: #242645;
             border-radius: 12px;
-            overflow: hidden;
-            background: #000;
-            margin-bottom: 20px;
-            position: relative;
-        }
-
-        #result {
-            margin-top: 15px;
-            font-weight: 700;
-            font-size: 1.1rem;
-            color: var(--primary-light);
-            background: rgba(92, 107, 192, 0.1);
-            padding: 12px;
-            border-radius: 10px;
-            display: none;
         }
 
         .btn {
             background: var(--primary);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 12px;
-            font-weight: 600;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 1.1rem;
             cursor: pointer;
-            transition: all 0.2s;
-            display: block;
             width: 100%;
-            margin-top: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .btn:active {
-            transform: scale(0.98);
-            background: var(--primary-light);
-        }
-
-        .btn-cancel {
-            background: transparent;
-            color: var(--text-dim);
-            border: 1px solid var(--text-dim);
-        }
-
-        .scan-line {
-            position: absolute;
-            top: 50%;
-            left: 0;
-            width: 100%;
-            height: 2px;
-            background: var(--accent);
-            box-shadow: 0 0 10px var(--accent);
-            animation: scan 2s linear infinite;
-            z-index: 10;
-        }
-
-        @keyframes scan {
-            0% { top: 10%; }
-            50% { top: 90%; }
-            100% { top: 10%; }
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📷 Scanner de Código</h1>
-        <p>Aponte a câmera para o código de barras</p>
-        
-        <div id="reader">
-            <div class="scan-line"></div>
-        </div>
-        
-        <div id="result">Lido: <span id="ean-val"></span></div>
-        
-        <button id="send-data" class="btn" style="display:none">Enviar para o Bot</button>
-        <button id="restart" class="btn" style="display:none">Tentar Outro</button>
-        <button onclick="tg.close()" class="btn btn-cancel">Cancelar</button>
+        <h2>Scanner Aqui Tem</h2>
+        <p>Utilizando o leitor nativo do Telegram para maior precisão.</p>
+        <button id="scan-btn" class="btn">Abrir Câmera</button>
+        <p style="font-size: 0.8rem; margin-top: 20px; opacity: 0.6;">Dica: Se a leitura falhar, tente aproximar ou afastar o celular.</p>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
 
-        let html5QrCode;
-        let lastEan = "";
-
-        function onScanSuccess(decodedText, decodedResult) {
-            // Se já leu um código recentemente, ignora por 2 segundos
-            if (decodedText === lastEan) return;
-            
-            lastEan = decodedText;
-            console.log(`Code matched = ${decodedText}`, decodedResult);
-            
-            // Pausar para confirmar
-            html5QrCode.pause(true);
-            
-            document.getElementById('result').style.display = 'block';
-            document.getElementById('ean-val').innerText = decodedText;
-            document.getElementById('send-data').style.display = 'block';
-            document.getElementById('restart').style.display = 'block';
-            
-            // Notificação haptic no Telegram
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.notificationOccurred("success");
+        function startNativeScan() {
+            // Abre o scanner nativo do Telegram
+            if (tg.showScanQrPopup) {
+                tg.showScanQrPopup({
+                    text: "Aponte para o código de barras (EAN)"
+                }, function(result) {
+                    if (result && result.length > 0) {
+                        // Ao encontrar um código, envia para o bot e encerra
+                        tg.sendData(result);
+                        tg.closeScanQrPopup();
+                        return true; // Encerra o popup
+                    }
+                });
+            } else {
+                alert("Seu Telegram não suporta o scanner nativo diretamente.");
             }
         }
 
-        function startScanner() {
-            html5QrCode = new Html5Qrcode("reader");
-            const config = { fps: 10, qrbox: { width: 250, height: 150 } };
-            
-            html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
-                .catch(err => {
-                    console.error("Camera fail:", err);
-                    alert("Erro ao abrir câmera. Verifique as permissões.");
-                });
-        }
+        document.getElementById('scan-btn').addEventListener('click', startNativeScan);
 
-        document.getElementById('send-data').addEventListener('click', () => {
-            // Envia o dado via web_app_data do Telegram
-            // Nota: Isso fecha o Mini App
-            tg.sendData(lastEan);
+        // Tenta abrir automaticamente ao carregar
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(startNativeScan, 500);
         });
-
-        document.getElementById('restart').addEventListener('click', () => {
-            document.getElementById('result').style.display = 'none';
-            document.getElementById('send-data').style.display = 'none';
-            document.getElementById('restart').style.display = 'none';
-            lastEan = "";
-            html5QrCode.resume();
-        });
-
-        // Iniciar ao carregar
-        document.addEventListener('DOMContentLoaded', startScanner);
     </script>
 </body>
 </html>
