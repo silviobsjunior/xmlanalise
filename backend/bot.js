@@ -8,13 +8,11 @@ const token = process.env.TELEGRAM_BOT_TOKEN;
 // Verifica se o token foi configurado para evitar crashes (importante para o Render)
 if (!token || token.includes('SEU_TOKEN_AQUI')) {
     console.warn('TELEGRAM_BOT_TOKEN não configurado corretamente. O bot do Telegram não será iniciado.');
-    // Retorna algo nulo, pois será instanciado no index.js
     module.exports = null;
     return;
 }
 
 // Inicializar bot em modo Polling.
-// (Futuramente você pode mudar para webhooks para deploy otimizado no Render)
 const bot = new TelegramBot(token, { polling: true });
 
 // Pool do banco PostgreSQL
@@ -24,19 +22,17 @@ const pool = new Pool({
 });
 
 // Mapa em memória para guardar o estado da conversa e sessão dos usuários
-// Ex: { 1234567: { step: 'waiting_location_or_city', ean: '7891234' } }
+// { 1234567: { ean: '7891234', cidade: 'JALES', bairro: 'CENTRO', step: '' } }
 const userSessions = {};
 
 // Comando de entrada do Bot
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    // URL do Telegram Mini App
-    // No ambiente Render em produção, o RENDER_EXTERNAL_URL deve apontar para o domínio público.
     const miniAppUrl = process.env.RENDER_EXTERNAL_URL
         ? `${process.env.RENDER_EXTERNAL_URL}/scanner.html`
-        : 'https://seu-app-no-render.onrender.com/scanner.html'; // Fallback para testar
+        : 'https://xmlanalise-node.onrender.com/scanner.html';
 
-    bot.sendMessage(chatId, "👋 Olá! Eu sou o *Aqui Tem Bot* baseado no xmlAnalise.\n\nPara verificar o preço/disponibilidade de um produto, você pode:\n1. *Digitar* seu Código de Barras (EAN).\n2. *Acessar o Scanner* no botão abaixo:", {
+    bot.sendMessage(chatId, "👋 Olá! Eu sou o *Aqui Tem Bot*.\n\nPara buscar um produto:\n1. **Digite** o Código de Barras (EAN).\n2. **Use o Scanner** no botão abaixo.\n\nApós a busca, você pode filtrar usando:\n🏙️ `/cidade [nome]`\n📍 `/bairro [nome]`\n🌎 `/global` (limpar filtros)", {
         parse_mode: 'Markdown',
         reply_markup: {
             inline_keyboard: [
@@ -46,91 +42,109 @@ bot.onText(/\/start/, (msg) => {
     });
 });
 
-// Botão Recebido do MiniApp web_app_data enviando dados via fechamento
+// Comandos de Filtro
+bot.onText(/\/cidade(?:\s+(.+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const cidade = match[1];
+
+    if (!userSessions[chatId] || !userSessions[chatId].ean) {
+        return bot.sendMessage(chatId, "❌ Primeiro, informe o EAN do produto (digite ou use o scanner).");
+    }
+
+    if (cidade) {
+        userSessions[chatId].cidade = cidade.trim();
+        userSessions[chatId].step = '';
+        bot.sendMessage(chatId, `🏙️ Filtrando por cidade: *${userSessions[chatId].cidade}*...`, { parse_mode: 'Markdown' });
+        await performProductSearch(chatId);
+    } else {
+        userSessions[chatId].step = 'waiting_city';
+        bot.sendMessage(chatId, "🏙️ Por favor, digite o nome da **cidade** para filtrar:");
+    }
+});
+
+bot.onText(/\/bairro(?:\s+(.+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const bairro = match[1];
+
+    if (!userSessions[chatId] || !userSessions[chatId].ean) {
+        return bot.sendMessage(chatId, "❌ Primeiro, informe o EAN do produto.");
+    }
+
+    if (bairro) {
+        userSessions[chatId].bairro = bairro.trim();
+        userSessions[chatId].step = '';
+        bot.sendMessage(chatId, `📍 Filtrando por bairro: *${userSessions[chatId].bairro}*...`, { parse_mode: 'Markdown' });
+        await performProductSearch(chatId);
+    } else {
+        userSessions[chatId].step = 'waiting_neighborhood';
+        bot.sendMessage(chatId, "📍 Por favor, digite o nome do **bairro** para filtrar:");
+    }
+});
+
+bot.onText(/\/global/, async (msg) => {
+    const chatId = msg.chat.id;
+    if (userSessions[chatId]) {
+        userSessions[chatId].cidade = null;
+        userSessions[chatId].bairro = null;
+        userSessions[chatId].step = '';
+        bot.sendMessage(chatId, "🌎 Removendo filtros. Buscando em todas as regiões...");
+        await performProductSearch(chatId);
+    }
+});
+
+// Botão Recebido do MiniApp web_app_data
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
-    // Se o retorno veio do Telegram Mini app e enviou a "web_app_data" String
     if (msg.web_app_data) {
-        const scannerData = msg.web_app_data.data; // ex: o numero do EAN enviado pelo scanner
+        const scannerData = msg.web_app_data.data;
         if (/^\d{8,14}$/.test(scannerData)) {
-            userSessions[chatId] = { step: 'waiting_location_or_city', ean: scannerData };
-            bot.sendMessage(chatId, `✅ EAN lido via Mini App: *${scannerData}*\n\nAgora precisamos filtrar. Envie sua **Localização (GPS)** pelo botão abaixo ou simplesmente **digite o nome da cidade**:`, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    keyboard: [
-                        [{ text: "📍 Enviar Minha Localização GPS", request_location: true }]
-                    ],
-                    one_time_keyboard: true,
-                    resize_keyboard: true
-                }
-            });
-        } else {
-            bot.sendMessage(chatId, "Não entendi o dado que o scanner mandou. Tente digitar o EAN.");
+            userSessions[chatId] = { ean: scannerData, step: '' };
+            bot.sendMessage(chatId, `✅ EAN lido: *${scannerData}*\nBuscando em todas as regiões...`, { parse_mode: 'Markdown' });
+            await performProductSearch(chatId);
         }
         return;
     }
 
-    // Se recebeu a localização física
     if (msg.location) {
-        let session = userSessions[chatId];
-        if (session && session.step === 'waiting_location_or_city') {
-            const lat = msg.location.latitude;
-            const long = msg.location.longitude;
-
-            bot.sendMessage(chatId, `📍 Localização recebida (${lat}, ${long}). Convertendo para cidade (Simulação). Buscando *${session.ean}*...`);
-
-            // Aqui você chamaria o Reverse Geocoding Map API para ter a cidade.
-            // Para simplicidade inicial, buscaremos sem filtro exato de localização abaixo.
-            await performProductSearch(chatId, session.ean, "");
-            delete userSessions[chatId];
+        if (userSessions[chatId] && userSessions[chatId].ean) {
+            bot.sendMessage(chatId, "📍 Localização GPS recebida. (Funcionalidade de cidade automática em desenvolvimento). Buscando globalmente por enquanto...");
+            await performProductSearch(chatId);
         }
         return;
     }
 
-    // Tratamento de Texto
     if (text && !text.startsWith('/')) {
         let session = userSessions[chatId];
 
-        // É um EAN formatado padrão? (usuário digitou em vez do Mini app)
-        if (!session && /^\d{8,14}$/.test(text.trim())) {
-            userSessions[chatId] = { step: 'waiting_location_or_city', ean: text.trim() };
-            return bot.sendMessage(chatId, `✅ EAN *${text.trim()}*.\n\nPara refinar, por favor envie sua **Localização (GPS)** pelo botão abaixo ou **digite o nome da cidade**:`, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    keyboard: [
-                        [{ text: "📍 Enviar Minha Localização GPS", request_location: true }]
-                    ],
-                    one_time_keyboard: true,
-                    resize_keyboard: true
-                }
-            });
+        // Se o usuário digitou um EAN novo
+        if (/^\d{8,14}$/.test(text.trim())) {
+            userSessions[chatId] = { ean: text.trim(), step: '' };
+            bot.sendMessage(chatId, `🔎 Buscando EAN *${text.trim()}*...`, { parse_mode: 'Markdown' });
+            return await performProductSearch(chatId);
         }
 
-        // Se estávamos esperando o nome de uma cidade
-        if (session && session.step === 'waiting_location_or_city') {
-            const cidadeDigitada = text.toUpperCase().trim();
-
-            // Responde removendo o teclado de GPS da tela inicial
-            bot.sendMessage(chatId, `Buscando resultados para EAN *${session.ean}* focando na região de *${cidadeDigitada}*...`, {
-                parse_mode: 'Markdown',
-                reply_markup: { remove_keyboard: true } // Some o botão de localização para não poluir
-            });
-
-            await performProductSearch(chatId, session.ean, cidadeDigitada);
-            delete userSessions[chatId];
-            return;
+        // Se estávamos esperando entrada de texto para cidade/bairro após comando sem parâmetro
+        if (session) {
+            if (session.step === 'waiting_city') {
+                session.cidade = text.trim();
+                session.step = '';
+                return await performProductSearch(chatId);
+            }
+            if (session.step === 'waiting_neighborhood') {
+                session.bairro = text.trim();
+                session.step = '';
+                return await performProductSearch(chatId);
+            }
         }
 
-        // Retorno Fallback
-        if (!session) {
-            bot.sendMessage(chatId, "Ops! Por favor, digite um Código de Barras (EAN com apenas números) ou use o menu iniciar (/start).");
+        if (!session || !session.ean) {
+            bot.sendMessage(chatId, "❓ Para começar, digite o Código de Barras (EAN) ou use /start.");
         }
     }
 });
 
-// Inicializar Tabelas Necessárias para o Bot (Ideia: proposta_monitoramento_pesquisa.md)
 async function initializeBotTables() {
     try {
         const sql = `
@@ -140,7 +154,6 @@ async function initializeBotTables() {
             ativo BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
-
         CREATE TABLE IF NOT EXISTS sugestoes_contextuais (
             id SERIAL PRIMARY KEY,
             item_monitorado_id INTEGER REFERENCES itens_monitorados(id) ON DELETE CASCADE,
@@ -149,7 +162,6 @@ async function initializeBotTables() {
             icone_id VARCHAR(50),
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
-
         CREATE TABLE IF NOT EXISTS logs_estatisticos_pesquisa (
             id SERIAL PRIMARY KEY,
             timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -158,38 +170,23 @@ async function initializeBotTables() {
             clicou_alerta BOOLEAN DEFAULT FALSE,
             id_usuario_sessao VARCHAR(255)
         );
-
-        -- Inserir Dados Iniciais se não existirem
-        INSERT INTO itens_monitorados (termo_chave) VALUES 
-        ('FARINHA DE TRIGO'), ('LEITE'), ('ARROZ'), ('PAO')
-        ON CONFLICT (termo_chave) DO NOTHING;
-
-        -- Sugestões iniciais (Exemplo robusto)
-        INSERT INTO sugestoes_contextuais (item_monitorado_id, titulo_popup, conteudo_json, icone_id)
-        SELECT id, 'Que tal uma Pizza caseira? 🍕', '{"itens": ["Fermento", "Molho de tomate", "Muzzarella", "Orégano"]}', 'chef-hat'
-        FROM itens_monitorados WHERE termo_chave = 'FARINHA DE TRIGO'
-        AND NOT EXISTS (SELECT 1 FROM sugestoes_contextuais WHERE item_monitorado_id = itens_monitorados.id);
-        
-        INSERT INTO sugestoes_contextuais (item_monitorado_id, titulo_popup, conteudo_json, icone_id)
-        SELECT id, 'Parceria perfeita! 🥘', '{"itens": ["Feijão", "Óleo", "Sal"]}', 'pot'
-        FROM itens_monitorados WHERE termo_chave = 'ARROZ'
-        AND NOT EXISTS (SELECT 1 FROM sugestoes_contextuais WHERE item_monitorado_id = itens_monitorados.id);
+        INSERT INTO itens_monitorados (termo_chave) VALUES ('FARINHA DE TRIGO'), ('LEITE'), ('ARROZ'), ('PAO') ON CONFLICT (termo_chave) DO NOTHING;
         `;
         await pool.query(sql);
     } catch (err) {
-        console.warn("⚠️ [BOT] Erro ao criar tabelas de monitoramento (provavelmente já existem ou sem permissão).", err.message);
+        console.warn("⚠️ [BOT] Erro ao criar tabelas.", err.message);
     }
 }
 
-// Chamar inicialização
 initializeBotTables();
 
-// Pesquisa no DB - mesmas informações exibidas na pesquisa do site
-async function performProductSearch(chatId, ean, cidade) {
+async function performProductSearch(chatId) {
+    const session = userSessions[chatId];
+    if (!session || !session.ean) return;
+
+    const { ean, cidade, bairro } = session;
+
     try {
-        console.log(`[BOT] Buscando EAN: ${ean} em ${cidade || 'qualquer lugar'}`);
-        
-        // Consulta alinhada com /api/buscar-produtos do site
         let query = `
             SELECT p.codigo_barras AS cean, p.descricao, p.ncm,
                    e.cnpj, e.razao_social, e.nome_fantasia,
@@ -206,21 +203,33 @@ async function performProductSearch(chatId, ean, cidade) {
         `;
         
         const params = [ean];
+        let paramIndex = 2;
+
         if (cidade) {
             params.push(cidade.toUpperCase());
             params.push(`%${cidade.toUpperCase()}%`);
-            query += ` AND (UPPER(e.municipio) = $${params.length - 1} OR UPPER(e.municipio) LIKE $${params.length})`;
+            query += ` AND (UPPER(e.municipio) = $${paramIndex} OR UPPER(e.municipio) LIKE $${paramIndex + 1})`;
+            paramIndex += 2;
+        }
+
+        if (bairro) {
+            params.push(`%${bairro.toUpperCase()}%`);
+            query += ` AND UPPER(e.bairro) LIKE $${paramIndex}`;
+            paramIndex++;
         }
         
-        query += ` ORDER BY nf.data_emissao DESC LIMIT 10`;
+        query += ` ORDER BY nf.data_emissao DESC LIMIT 15`;
 
         const { rows } = await pool.query(query, params);
 
         if (rows.length === 0) {
-            return bot.sendMessage(chatId, `❌ Desculpe, não encontrei registros para o EAN *${ean}*${cidade ? ' na região de *' + cidade + '*' : ''}.`, { parse_mode: 'Markdown' });
+            let errorMsg = `❌ Nada encontrado para o EAN *${ean}*`;
+            if (cidade) errorMsg += ` na cidade *${cidade}*`;
+            if (bairro) errorMsg += ` no bairro *${bairro}*`;
+            errorMsg += ".\nTente /global para ver todos ou mudar o filtro.";
+            return bot.sendMessage(chatId, errorMsg, { parse_mode: 'Markdown' });
         }
 
-        // Agrupar por vendedor (mesmo comportamento do site)
         const vendedoresMap = new Map();
         let descricaoProduto = '';
         let ncmProduto = '';
@@ -242,53 +251,43 @@ async function performProductSearch(chatId, ean, cidade) {
             }
         });
 
-        // Montar mensagem com as mesmas infos do site
-        let msg = `🔎 *PRODUTO ENCONTRADO*\n\n`;
+        let msg = `🔎 *RESULTADOS PENTENTES*\n`;
         msg += `📦 *Produto:* ${descricaoProduto}\n`;
-        msg += `🔢 *EAN:* \`${ean}\`\n`;
-        if (ncmProduto) msg += `🏷️ *NCM:* ${ncmProduto}\n`;
-        msg += `\n🏪 *Vendedores encontrados (${vendedoresMap.size}):*\n`;
+        msg += `🔢 *EAN:* \`${ean}\`\n\n`;
+        
+        if (cidade || bairro) {
+            msg += `📍 *Filtros ativos:* ${[cidade, bairro].filter(Boolean).join(' > ')}\n\n`;
+        }
+
+        msg += `🏪 *Vendedores encontrados (${vendedoresMap.size}):*\n`;
 
         let count = 0;
         for (const [cnpj, v] of vendedoresMap) {
-            if (count >= 5) {
-                msg += `\n_...e mais ${vendedoresMap.size - 5} vendedor(es)_`;
+            if (count >= 8) {
+                msg += `\n_...e mais ${vendedoresMap.size - 8}_`;
                 break;
             }
             msg += `\n• *${v.nome}*`;
-            if (v.bairro || v.cidade) {
-                msg += `\n  📍 ${[v.bairro, v.cidade, v.uf].filter(Boolean).join(', ')}`;
-            }
-            if (v.telefone) {
-                msg += `\n  📞 ${v.telefone}`;
-            }
+            msg += `\n  📍 ${[v.bairro, v.cidade, v.uf].filter(Boolean).join(', ')}`;
+            if (v.telefone) msg += `\n  📞 ${v.telefone}`;
             count++;
         }
 
-        bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+        msg += `\n\n💡 _Dica: Use /cidade, /bairro ou /global para ajustar a busca._`;
 
-        // INTEGRAÇÃO: Sugestões Contextuais
+        bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
         await verificarSugestoesCrossSell(chatId, descricaoProduto);
 
     } catch (err) {
         console.error("Erro no Bot DB: ", err);
-        bot.sendMessage(chatId, "Ocorreu um erro no servidor backend ao buscar os dados da Nota.");
+        bot.sendMessage(chatId, "Ocorreu um erro ao buscar os dados.");
     }
 }
 
-// Implementando o conceito da 'proposta_monitoramento_pesquisa.md'
 async function verificarSugestoesCrossSell(chatId, produtoNome) {
     try {
         const nomeUpper = produtoNome.toUpperCase();
-        
-        // Registrar a pesquisa estatística
-        await pool.query(
-            `INSERT INTO logs_estatisticos_pesquisa (termo_pesquisado, id_usuario_sessao) VALUES ($1, $2)`,
-            [nomeUpper, String(chatId)]
-        );
-
-        // Buscar se existe algum termo monitorado que "bate" com a descrição
-        // Ex: Se tem "FARINHA" monitorado, e o produto é "FARINHA DE TRIGO DONA BENTA"
+        await pool.query( `INSERT INTO logs_estatisticos_pesquisa (termo_pesquisado, id_usuario_sessao) VALUES ($1, $2)`, [nomeUpper, String(chatId)] );
         const { rows: matches } = await pool.query(`
             SELECT im.id, im.termo_chave, sc.titulo_popup, sc.conteudo_json 
             FROM itens_monitorados im
@@ -300,23 +299,11 @@ async function verificarSugestoesCrossSell(chatId, produtoNome) {
         if (matches.length > 0) {
             const m = matches[0];
             const itensCrossover = m.conteudo_json.itens ? m.conteudo_json.itens.join(', ') : "Diversos";
-            
-            const msg = `💡 *SUGESTÃO DO AQUI TEM*\n\n` +
-                        `*${m.titulo_popup}*\n\n` +
-                        `Usuários frequentemente relacionam com: _${itensCrossover}_\n\n` +
-                        `👉 *Deseja buscar algum desses itens agora?* Basta digitar o nome.`;
-
+            const msg = `💡 *SUGESTÃO*\n*${m.titulo_popup}*\nRelacionados: _${itensCrossover}_`;
             bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
-            
-            // Marcar que exibiu o alerta no último log
-            await pool.query(`
-                UPDATE logs_estatisticos_pesquisa 
-                SET exibiu_alerta = TRUE 
-                WHERE id = (SELECT MAX(id) FROM logs_estatisticos_pesquisa WHERE id_usuario_sessao = $1)
-            `, [String(chatId)]);
         }
     } catch (err) {
-        console.error("Erro ao verificar cross-sell:", err.message);
+        console.error("Erro cross-sell:", err.message);
     }
 }
 
