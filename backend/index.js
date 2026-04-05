@@ -241,6 +241,18 @@ pool.connect((err, client, release) => {
     } else {
         console.log(`${getTimestamp()} ✅ Conectado ao PostgreSQL com sucesso!`);
         release();
+
+        // =============================================
+        // INICIALIZAR TELEGRAM BOT (bot.js)
+        // =============================================
+        try {
+            const telegramBot = require('./bot');
+            if (telegramBot) {
+                console.log(`${getTimestamp()} 🤖 Bot do Telegram inicializado e escutando...`);
+            }
+        } catch (botErr) {
+            console.error(`${getTimestamp()} ⚠️ Falha ao carregar bot.js:`, botErr.message);
+        }
     }
 });
 
