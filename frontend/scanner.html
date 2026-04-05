@@ -12,6 +12,7 @@
             --bg: #1a1b2e;
             --text: #ffffff;
             --accent: #ff4081;
+            --success: #4caf50;
         }
 
         body {
@@ -27,9 +28,10 @@
         }
 
         .header {
-            padding: 15px;
+            padding: 10px;
             text-align: center;
             background: #242645;
+            z-index: 10;
         }
 
         #reader {
@@ -39,19 +41,18 @@
             background: #000;
         }
 
-        /* Overlay para o scanner */
         .scanner-overlay {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 80%;
-            height: 150px;
+            width: 85%;
+            height: 140px;
             border: 2px solid var(--primary);
             border-radius: 12px;
             pointer-events: none;
             z-index: 100;
-            box-shadow: 0 0 0 1000px rgba(0,0,0,0.5);
+            box-shadow: 0 0 0 1000px rgba(0,0,0,0.6);
         }
 
         .scanner-line {
@@ -70,43 +71,64 @@
         }
 
         .footer {
-            padding: 20px;
+            padding: 15px;
             background: #242645;
             display: flex;
             flex-direction: column;
+            gap: 12px;
+            z-index: 10;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 10px;
         }
 
         .btn {
-            padding: 12px;
-            border-radius: 8px;
+            padding: 14px;
+            border-radius: 10px;
             border: none;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
             text-align: center;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
 
         .btn-primary { background: var(--primary); color: white; }
-        .btn-cancel { background: transparent; border: 1px solid #444; color: #aaa; }
+        .btn-accent { background: var(--accent); color: white; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-cancel { background: #333; color: #ccc; }
 
         #result-banner {
             position: fixed;
-            bottom: 120px;
-            left: 20px;
-            right: 20px;
-            background: var(--primary);
-            padding: 15px;
-            border-radius: 12px;
+            bottom: 140px;
+            left: 15px;
+            right: 15px;
+            background: #ffffff;
+            color: #1a1b2e;
+            padding: 18px;
+            border-radius: 14px;
             display: none;
             z-index: 200;
             text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        }
+
+        .torch-active {
+            background-color: #ffd600 !important;
+            color: #000 !important;
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h3 style="margin:0">🔍 Scanner de Preços</h3>
-        <p style="font-size:0.8rem; margin:5px 0 0; opacity:0.7">Alinhe o código de barras no quadro</p>
+        <h3 style="margin:0">🔍 Scanner Aqui Tem</h3>
+        <p style="font-size:0.75rem; margin:4px 0 0; opacity:0.7">Centralize o código de barras no retângulo</p>
     </div>
 
     <div style="position: relative; flex:1; display: flex; flex-direction: column;">
@@ -117,72 +139,96 @@
     </div>
 
     <div id="result-banner">
-        <div style="font-size: 0.8rem; opacity: 0.8;">Código Detectado:</div>
-        <div id="detected-ean" style="font-size: 1.2rem; font-weight: bold; margin: 5px 0;"></div>
-        <button id="send-btn" class="btn btn-primary" style="width: 100%; margin-top: 5px;">PESQUISAR AGORA</button>
+        <div style="font-size: 0.8rem; font-weight: 600; opacity: 0.6; margin-bottom: 4px;">CÓDIGO ENCONTRADO</div>
+        <div id="detected-ean" style="font-size: 1.5rem; font-weight: 900; letter-spacing: 2px;"></div>
+        <div style="display: flex; gap: 8px; margin-top: 15px;">
+            <button id="retry-btn" class="btn btn-cancel" style="flex:1">NOVO SCAN</button>
+            <button id="send-btn" class="btn btn-success" style="flex:2">BUSCAR AGORA</button>
+        </div>
     </div>
 
     <div class="footer">
-        <button id="retry-btn" class="btn btn-primary" style="display:none">Tentar Novamente</button>
-        <button onclick="tg.close()" class="btn btn-cancel">Cancelar</button>
+        <div class="controls">
+            <button id="torch-btn" class="btn btn-primary">🔦 LANTERNA</button>
+            <button id="restart-btn" class="btn btn-cancel">🔄 REINICIAR</button>
+        </div>
+        <button onclick="tg.close()" class="btn btn-cancel" style="width: 100%;">FECHAR</button>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
+        tg.enableClosingConfirmation();
 
         let html5QrCode;
         let lastResult = "";
+        let isTorchOn = false;
 
-        async function initScanner() {
+        async function startScanning() {
             try {
-                // Tenta pausar o anterior se houver
-                if (html5QrCode) await html5QrCode.stop();
+                if (html5QrCode) {
+                    await html5QrCode.stop().catch(() => {});
+                }
                 
                 html5QrCode = new Html5Qrcode("reader");
                 
-                const qrCodeSuccessCallback = (decodedText, decodedResult) => {
+                const qrCodeSuccessCallback = (decodedText) => {
                     if (decodedText === lastResult) return;
                     lastResult = decodedText;
                     
-                    // Sucesso na leitura
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+                    
+                    // Pausa o vídeo e mostra o resultado
+                    html5QrCode.pause(true);
                     
                     document.getElementById('overlay').style.display = 'none';
                     document.getElementById('detected-ean').innerText = decodedText;
                     document.getElementById('result-banner').style.display = 'block';
-                    
-                    // Pausar o scanner
-                    html5QrCode.pause(true);
                 };
 
                 const config = { 
-                    fps: 15, // Mais rápido para barras
-                    qrbox: { width: 300, height: 150 }, // Formato retangular para EAN
+                    fps: 20, 
+                    qrbox: { width: 320, height: 160 },
                     aspectRatio: 1.0,
-                    // Priorizar formatos de barras comuns no Brasil
-                    formatsToSupport: [ 
-                        6, // EAN_13
-                        7, // EAN_8
-                        4, // CODE_128
-                        0  // QR_CODE
-                    ]
+                    formatsToSupport: [ 6, 7, 4, 0 ] // EAN_13, EAN_8, CODE_128, QR
                 };
 
                 await html5QrCode.start({ facingMode: "environment" }, config, qrCodeSuccessCallback);
             } catch (err) {
                 console.error("Scanner Error:", err);
-                alert("Erro ao acessar câmera. Verifique as permissões.");
+                // Pequeno delay e tenta de novo se for erro de "Already started"
+                if (err.toString().includes("already started")) {
+                    setTimeout(startScanning, 500);
+                }
             }
         }
 
-        document.getElementById('send-btn').addEventListener('click', () => {
-            if (lastResult) {
-                tg.sendData(lastResult);
-                tg.close();
+        // Lanterna
+        document.getElementById('torch-btn').addEventListener('click', async () => {
+            if (!html5QrCode) return;
+            try {
+                isTorchOn = !isTorchOn;
+                await html5QrCode.applyVideoConstraints({
+                    advanced: [{ torch: isTorchOn }]
+                });
+                const btn = document.getElementById('torch-btn');
+                if (isTorchOn) btn.classList.add('torch-active');
+                else btn.classList.remove('torch-active');
+            } catch (e) {
+                console.warn("Torch not supported:", e);
+                alert("Lanterna não suportada neste dispositivo.");
             }
         });
 
+        // Reiniciar Câmera
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            lastResult = "";
+            document.getElementById('result-banner').style.display = 'none';
+            document.getElementById('overlay').style.display = 'block';
+            startScanning();
+        });
+
+        // Novo Scan (após sucesso)
         document.getElementById('retry-btn').addEventListener('click', () => {
             lastResult = "";
             document.getElementById('result-banner').style.display = 'none';
@@ -190,8 +236,15 @@
             html5QrCode.resume();
         });
 
-        // Espera um pouco para garantir que o container esteja pronto
-        setTimeout(initScanner, 300);
+        // Enviar
+        document.getElementById('send-btn').addEventListener('click', () => {
+            if (lastResult) {
+                tg.sendData(lastResult);
+                tg.close();
+            }
+        });
+
+        window.onload = () => setTimeout(startScanning, 500);
     </script>
 </body>
 </html>
