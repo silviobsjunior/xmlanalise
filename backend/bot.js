@@ -40,11 +40,12 @@ const getMenuKeyboard = (chatId) => {
         
     const session = userSessions[chatId] || {};
     const cityText = session.cidade ? `📍 Cidade: ${session.cidade}` : "📍 Definir Cidade";
+    const neighborhoodText = session.bairro ? `🏘️ Bairro: ${session.bairro}` : "🏘️ Definir Bairro";
 
     const keyboard = [
         [{ text: "🔍 Nova Busca" }, { text: "📷 Abrir Scanner", web_app: { url: miniAppUrl } }],
-        [{ text: cityText }, { text: "🧹 Limpar Tudo" }],
-        [{ text: "❓ Ajuda" }]
+        [{ text: cityText }, { text: neighborhoodText }],
+        [{ text: "🧹 Limpar Tudo" }, { text: "❓ Ajuda" }]
     ];
 
     return {
@@ -81,14 +82,14 @@ bot.on('message', async (msg) => {
         return bot.sendMessage(chatId, "Digite o nome do produto ou o código de barras:");
     }
 
-    if (text && text.startsWith("📍 Cidade:")) {
-        if (userSessions[chatId]) userSessions[chatId].cidade = null;
-        return bot.sendMessage(chatId, "📍 Cidade removida. Informe a nova cidade na próxima busca.", getMenuKeyboard(chatId));
+    if (text && text.startsWith("🏘️ Bairro:")) {
+        if (userSessions[chatId]) userSessions[chatId].bairro = null;
+        return bot.sendMessage(chatId, "🏘️ Filtro de bairro removido.", getMenuKeyboard(chatId));
     }
 
     if (text === "🧹 Limpar Tudo") {
         delete userSessions[chatId];
-        return bot.sendMessage(chatId, "✨ Histórico e filtros limpos. Como posso ajudar?", getMenuKeyboard(chatId));
+        return bot.sendMessage(chatId, "✨ Histórico e filtros de cidade/bairro limpos.", getMenuKeyboard(chatId));
     }
 
     if (text === "❓ Ajuda") {
@@ -108,13 +109,16 @@ bot.on('message', async (msg) => {
                 const norm = normalizeText(city);
                 if (norm) {
                     session.cidade = norm;
-                    await performProductSearch(chatId, session.query, session.isEan, norm, 0);
+                    session.step = 'waiting_neighborhood';
+                    askForNeighborhood(chatId);
                 } else {
-                    await performProductSearch(chatId, session.query, session.isEan, "", 0);
+                    session.step = 'browsing';
+                    await performProductSearch(chatId, session.query, session.isEan, "", "", 0);
                 }
             } catch (err) {
                 console.error("GPS Error:", err.message);
-                await performProductSearch(chatId, session.query, session.isEan, "", 0);
+                session.step = 'browsing';
+                await performProductSearch(chatId, session.query, session.isEan, "", "", 0);
             }
             return;
         }
@@ -126,11 +130,28 @@ bot.on('message', async (msg) => {
     if (session && session.step === 'waiting_location_or_city') {
         const input = text.toUpperCase().trim();
         if (input === "PULAR FILTRO" || input === "PULAR") {
-            await performProductSearch(chatId, session.query, session.isEan, "", 0);
+            session.step = 'browsing';
+            await performProductSearch(chatId, session.query, session.isEan, "", "", 0);
         } else {
             const cityInput = normalizeText(text);
             session.cidade = cityInput;
-            await performProductSearch(chatId, session.query, session.isEan, cityInput, 0);
+            session.step = 'waiting_neighborhood';
+            askForNeighborhood(chatId);
+        }
+        return;
+    }
+
+    if (session && session.step === 'waiting_neighborhood') {
+        const input = text.toUpperCase().trim();
+        if (input === "PULAR BAIRRO" || input === "TUDO" || input.includes("VER TODA A CIDADE")) {
+            session.bairro = null;
+            session.step = 'browsing';
+            await performProductSearch(chatId, session.query, session.isEan, session.cidade, "", 0);
+        } else {
+            const bairroInput = normalizeText(text);
+            session.bairro = bairroInput;
+            session.step = 'browsing';
+            await performProductSearch(chatId, session.query, session.isEan, session.cidade, bairroInput, 0);
         }
         return;
     }
@@ -143,8 +164,8 @@ async function handleSearchInput(chatId, input) {
     const existing = userSessions[chatId];
     
     if (existing && existing.cidade) {
-        userSessions[chatId] = { step: 'browsing', query: input.trim(), isEan: isEan, offset:0, cidade: existing.cidade };
-        return await performProductSearch(chatId, input.trim(), isEan, existing.cidade, 0);
+        userSessions[chatId] = { ...existing, step: 'browsing', query: input.trim(), isEan: isEan, offset:0 };
+        return await performProductSearch(chatId, input.trim(), isEan, existing.cidade, existing.bairro, 0);
     }
 
     userSessions[chatId] = { step: 'waiting_location_or_city', query: input.trim(), isEan: isEan, offset:0 };
@@ -161,23 +182,35 @@ async function handleSearchInput(chatId, input) {
     });
 }
 
+async function askForNeighborhood(chatId) {
+    bot.sendMessage(chatId, "🏘️ Algum *bairro* específico em mente?\n\nDigite o nome do bairro ou clique em 'Ver Toda a Cidade' para uma busca ampla:", {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            keyboard: [
+                [{ text: "🏘️ Ver Toda a Cidade" }],
+                [{ text: "🔍 Nova Busca" }, { text: "🧹 Limpar Tudo" }]
+            ],
+            resize_keyboard: true
+        }
+    });
+}
+
 bot.on('callback_query', async (cq) => {
     const chatId = cq.message.chat.id;
     if (cq.data === 'ver_mais') {
         const s = userSessions[chatId];
         if (s && s.query) {
             s.offset = (s.offset || 0) + 5;
-            await performProductSearch(chatId, s.query, s.isEan, s.cidade, s.offset);
+            await performProductSearch(chatId, s.query, s.isEan, s.cidade, s.bairro, s.offset);
         }
     }
     bot.answerCallbackQuery(cq.id);
 });
 
-async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
+async function performProductSearch(chatId, query, isEan, cidade, bairro, offset = 0) {
     try {
         const limit = 5;
         let params = [];
-        let whereSql = '';
         
         let sqlTermo = 'TRUE';
         if (query) {
@@ -194,6 +227,10 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
         if (cidade) {
             params.push(`%${cidade}%`);
             filtroLoc = ` AND e.municipio ILIKE $${params.length}`;
+        }
+        if (bairro) {
+            params.push(`%${bairro}%`);
+            filtroLoc += ` AND e.bairro ILIKE $${params.length}`;
         }
 
         // QUERY IDENTICA AO SITE (UNION ALL) com NCM
@@ -251,7 +288,7 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
             WHERE d.cnpj IS NOT NULL
               AND d.cnpj ~ '^[0-9]{14}$'
               AND nf.perspectiva_importador = 'revendedor'
-              AND ${sqlTermo} ${filtroLoc.replace('e.municipio', 'd.municipio')}
+              AND ${sqlTermo} ${filtroLoc.replace(/e\.municipio/g, 'd.municipio').replace(/e\.bairro/g, 'd.bairro')}
 
             ORDER BY data_emissao DESC
             LIMIT ${limit} OFFSET ${offset}
@@ -276,7 +313,7 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
             const endereco = `${r.vendedor_logradouro || ''}, ${r.vendedor_numero || ''} - ${r.vendedor_bairro || ''}, ${r.vendedor_cidade || ''}/${r.vendedor_uf || ''}`;
             const encodedAddr = encodeURIComponent(endereco);
 
-            const msgText = `📦 *${r.descricao}*\n🆔 EAN: \`${r.codigo_barras || 'N/A'}\` | NCM: \`${r.ncm || 'N/A'}\`\n🏪 ${loja}\n📍 ${r.vendedor_cidade}\n🏠 _${endereco}_\n🗓️ _Visto em: ${new Date(r.data_emissao).toLocaleDateString('pt-BR')}_`;
+            const msgText = `📦 *${r.descricao}*\n🆔 EAN: \`${r.codigo_barras || 'N/A'}\` | NCM: \`${r.ncm || 'N/A'}\`\n🏪 *${loja}*\n📂 CNPJ: \`${r.vendedor_cnpj || '---'}\`\n📍 ${r.vendedor_cidade} - ${r.vendedor_bairro || ''}\n🏠 _${endereco}_`;
 
             const inline_keyboard = [[
                 { text: "🚗 Waze", url: `https://waze.com/ul?q=${encodedAddr}` },
