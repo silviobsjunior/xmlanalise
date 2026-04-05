@@ -175,13 +175,9 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
         let whereSql = '';
         
         let sqlTermo = 'TRUE';
-        if (isEan) {
-            params.push(query);
-            sqlTermo = `p.codigo_barras = $${params.length}`;
-        } else {
-            params.push(`%${query}%`);
-            sqlTermo = `(p.descricao ILIKE $${params.length} OR p.codigo_barras ILIKE $${params.length})`;
-        }
+        // Busca flexível como a do site, tratando termo e EAN da mesma forma (ILIKE)
+        params.push(`%${query}%`);
+        sqlTermo = `(p.descricao ILIKE $${params.length} OR p.codigo_barras ILIKE $${params.length})`;
 
         let filtroLoc = '';
         if (cidade) {
@@ -189,29 +185,73 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
             filtroLoc = ` AND e.municipio ILIKE $${params.length}`;
         }
 
-        // QUERY IGUAL AO SITE (PARTE 1: EMITENTE)
-        const commonSql = `
+        // QUERY IDENTICA AO SITE (UNION ALL)
+        const queryStr = `
+            -- PARTE 1: PERSPECTIVAS 'emitente' OU 'consumidor' -> EXIBE APENAS O EMITENTE
+            SELECT p.descricao, p.valor_unitario, p.codigo_barras,
+                   e.cnpj AS vendedor_cnpj, e.razao_social AS vendedor_razao_social,
+                   e.nome_fantasia AS vendedor_nome_fantasia,
+                   e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
+                   e.bairro AS vendedor_bairro, e.municipio AS vendedor_cidade, e.uf AS vendedor_uf,
+                   nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
             FROM produtos_nfe p
             JOIN nfe_importadas ni ON p.nfe_id = ni.id
             JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
             JOIN atores a          ON nf.emitente_id = a.id
             JOIN emitentes e       ON a.identificador = e.cnpj
-            WHERE e.cnpj ~ '^[0-9]{14}$'
+            WHERE e.cnpj IS NOT NULL 
+              AND e.cnpj ~ '^[0-9]{14}$'
               AND nf.perspectiva_importador IN ('emitente', 'consumidor')
               AND ${sqlTermo} ${filtroLoc}
+
+            UNION ALL
+
+            -- PARTE 2A: PERSPECTIVA 'revendedor' (Emitente)
+            SELECT p.descricao, p.valor_unitario, p.codigo_barras,
+                   e.cnpj AS vendedor_cnpj, e.razao_social AS vendedor_razao_social,
+                   e.nome_fantasia AS vendedor_nome_fantasia,
+                   e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
+                   e.bairro AS vendedor_bairro, e.municipio AS vendedor_cidade, e.uf AS vendedor_uf,
+                   nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
+            FROM produtos_nfe p
+            JOIN nfe_importadas ni ON p.nfe_id = ni.id
+            JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
+            JOIN atores a          ON nf.emitente_id = a.id
+            JOIN emitentes e       ON a.identificador = e.cnpj
+            WHERE e.cnpj IS NOT NULL
+              AND e.cnpj ~ '^[0-9]{14}$'
+              AND nf.perspectiva_importador = 'revendedor'
+              AND ${sqlTermo} ${filtroLoc}
+
+            UNION ALL
+
+            -- PARTE 2B: PERSPECTIVA 'revendedor' (Destinatário)
+            SELECT p.descricao, p.valor_unitario, p.codigo_barras,
+                   d.cnpj AS vendedor_cnpj, d.razao_social AS vendedor_razao_social,
+                   NULL AS vendedor_nome_fantasia,
+                   d.logradouro AS vendedor_logradouro, d.numero AS vendedor_numero,
+                   d.bairro AS vendedor_bairro, d.municipio AS vendedor_cidade, d.uf AS vendedor_uf,
+                   nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
+            FROM produtos_nfe p
+            JOIN nfe_importadas ni ON p.nfe_id = ni.id
+            JOIN notas_fiscais nf  ON ni.chave_acesso = nf.chave_acesso
+            JOIN atores a          ON nf.destinatario_id = a.id
+            JOIN destinatarios d   ON a.identificador = d.cnpj
+            WHERE d.cnpj IS NOT NULL
+              AND d.cnpj ~ '^[0-9]{14}$'
+              AND nf.perspectiva_importador = 'revendedor'
+              AND ${sqlTermo} ${filtroLoc.replace('e.municipio', 'd.municipio')}
+
+            ORDER BY data_emissao DESC
+            LIMIT ${limit} OFFSET ${offset}
         `;
 
-        const countRes = await pool.query(`SELECT count(*) ${commonSql}`, params);
-        const total = parseInt(countRes.rows[0].count);
+        // Para o COUNT total, precisamos da mesma estrutura de UNION ou simplificar se possível
+        // Mas para precisão, melhor usar SUBQUERY
+        const totalRes = await pool.query(`SELECT count(*) FROM (${queryStr.split('LIMIT')[0]}) as sub`, params);
+        const total = parseInt(totalRes.rows[0].count);
 
-        const dataRes = await pool.query(`
-            SELECT p.descricao, p.valor_unitario, e.municipio, e.uf, e.nome_fantasia as loja_fantasia, 
-                   e.razao_social as loja_razao, e.logradouro, e.numero, e.bairro
-            ${commonSql}
-            ORDER BY nf.data_emissao DESC
-            LIMIT ${limit} OFFSET ${offset}
-        `, params);
-
+        const dataRes = await pool.query(queryStr, params);
         const rows = dataRes.rows;
 
         if (rows.length === 0) {
@@ -222,11 +262,11 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
 
         for (const r of rows) {
             const preco = r.valor_unitario ? parseFloat(r.valor_unitario).toFixed(2) : '0.00';
-            const loja = r.loja_fantasia || r.loja_razao || 'Loja';
-            const endereco = `${r.logradouro || ''}, ${r.numero || ''} - ${r.bairro || ''}, ${r.municipio || ''}/${r.uf || ''}`;
+            const loja = r.vendedor_nome_fantasia || r.vendedor_razao_social || 'Loja';
+            const endereco = `${r.vendedor_logradouro || ''}, ${r.vendedor_numero || ''} - ${r.vendedor_bairro || ''}, ${r.vendedor_cidade || ''}/${r.vendedor_uf || ''}`;
             const encodedAddr = encodeURIComponent(endereco);
 
-            const msgText = `📦 *${r.descricao}*\n💰 R$ ${preco}\n🏪 ${loja}\n📍 ${r.municipio}\n🏠 _${endereco}_`;
+            const msgText = `📦 *${r.descricao}*\n💰 R$ ${preco}\n🏪 ${loja}\n📍 ${r.vendedor_cidade}\n🏠 _${endereco}_\n🗓️ _Visto em: ${new Date(r.data_emissao).toLocaleDateString('pt-BR')}_`;
 
             const inline_keyboard = [[
                 { text: "🚗 Waze", url: `https://waze.com/ul?q=${encodedAddr}` },
