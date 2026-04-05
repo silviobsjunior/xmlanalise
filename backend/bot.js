@@ -21,18 +21,37 @@ const pool = new Pool({
 
 const userSessions = {};
 
-// Teclado principal (Reply Keyboard - Necessário para Web App sendData)
-const getMenuKeyboard = () => {
+// Função para normalizar texto (MAIÚSCULO e SEM ACENTOS) - Igual ao index.js
+function normalizeText(text) {
+    if (!text) return text;
+    return text
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+        .replace(/[^a-zA-Z0-9\s]/g, ' ') // Remove caracteres especiais
+        .toUpperCase()
+        .trim()
+        .replace(/\s+/g, ' '); // Remove espaços duplos
+}
+
+// Teclado principal
+const getMenuKeyboard = (chatId) => {
     const miniAppUrl = process.env.RENDER_EXTERNAL_URL
         ? `${process.env.RENDER_EXTERNAL_URL}/scanner.html`
         : 'https://xmlanalise-node.onrender.com/scanner.html';
         
+    const keyboard = [
+        [{ text: "🔍 Nova Busca" }, { text: "📷 Abrir Scanner", web_app: { url: miniAppUrl } }],
+        [{ text: "❓ Ajuda" }]
+    ];
+
+    // Se houver uma cidade salva, adiciona opção de limpar/trocar
+    if (userSessions[chatId] && userSessions[chatId].cidade) {
+        keyboard.push([{ text: `📍 Trocar Cidade (${userSessions[chatId].cidade})` }]);
+    }
+
     return {
         reply_markup: {
-            keyboard: [
-                [{ text: "🔍 Nova Busca" }, { text: "📷 Abrir Scanner", web_app: { url: miniAppUrl } }],
-                [{ text: "❓ Ajuda" }]
-            ],
+            keyboard: keyboard,
             resize_keyboard: true
         }
     };
@@ -41,16 +60,16 @@ const getMenuKeyboard = () => {
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     delete userSessions[chatId];
-    bot.sendMessage(chatId, "👋 Olá! Bem-vindo ao *Aqui Tem Bot*.\n\nEscolha uma opção no menu ou digite o nome/EAN do produto abaixo.", {
+    bot.sendMessage(chatId, "👋 Olá! Bem-vindo ao *Aqui Tem Bot*.\n\nDigite o nome ou EAN do produto para começar.", {
         parse_mode: 'Markdown',
-        ...getMenuKeyboard()
+        ...getMenuKeyboard(chatId)
     });
 });
 
 bot.onText(/\/reset/, (msg) => {
     const chatId = msg.chat.id;
     delete userSessions[chatId];
-    bot.sendMessage(chatId, "🔄 Busca reiniciada. O que deseja procurar?", getMenuKeyboard());
+    bot.sendMessage(chatId, "🔄 Tudo reiniciado. O que deseja procurar?", getMenuKeyboard(chatId));
 });
 
 bot.on('message', async (msg) => {
@@ -59,20 +78,24 @@ bot.on('message', async (msg) => {
 
     if (!text && !msg.location && !msg.web_app_data) return;
 
-    // Resposta do Scanner (web_app_data)
     if (msg.web_app_data) {
-        const ean = msg.web_app_data.data;
-        handleSearchInput(chatId, ean);
+        handleSearchInput(chatId, msg.web_app_data.data);
         return;
     }
 
     if (text === "🔍 Nova Busca") {
-        delete userSessions[chatId];
+        const session = userSessions[chatId];
+        userSessions[chatId] = { cidade: session?.cidade, step: 'idle' };
         return bot.sendMessage(chatId, "Digite o nome do produto ou o código de barras:");
     }
 
+    if (text && text.startsWith("📍 Trocar Cidade")) {
+        if (userSessions[chatId]) userSessions[chatId].cidade = null;
+        return bot.sendMessage(chatId, "📍 Cidade removida. Na próxima busca você poderá informar uma nova.", getMenuKeyboard(chatId));
+    }
+
     if (text === "❓ Ajuda") {
-        return bot.sendMessage(chatId, "💡 *Dicas:*\n- Busque por nome ou EAN.\n- Você pode filtrar por sua cidade.\n- Use as direções no Maps/Waze no resultado.", { parse_mode: 'Markdown' });
+        return bot.sendMessage(chatId, "💡 *Dicas:*\n- Busque por nome ou EAN.\n- A cidade fica salva para agilizar futuras buscas.\n- Use 'Nova Busca' para outro produto com a mesma cidade.", { parse_mode: 'Markdown' });
     }
 
     // Localização GPS
@@ -81,19 +104,20 @@ bot.on('message', async (msg) => {
         if (session && session.step === 'waiting_location_or_city') {
             try {
                 const { latitude, longitude } = msg.location;
-                // Reverse Geocoding via Nominatim (Gratuito/OSM)
-                bot.sendMessage(chatId, "📍 Identificando sua cidade...");
+                bot.sendMessage(chatId, "📍 Identificando localidade...");
                 const response = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
                     headers: { 'User-Agent': 'AquiTemBot/1.0' }
                 });
                 
-                const cidadeIdentificada = response.data.address.city || response.data.address.town || response.data.address.suburb || "";
+                let rawCity = response.data.address.city || response.data.address.town || response.data.address.suburb || "";
+                const normalizedCity = normalizeText(rawCity);
                 
-                if (cidadeIdentificada) {
-                    bot.sendMessage(chatId, `📍 Localidade: *${cidadeIdentificada}*. Buscando *${session.query}*...`, { parse_mode: 'Markdown' });
-                    await performProductSearch(chatId, session.query, session.isEan, cidadeIdentificada, 0);
+                if (normalizedCity) {
+                    session.cidade = normalizedCity;
+                    bot.sendMessage(chatId, `📍 Localidade salva: *${normalizedCity}*.`, { parse_mode: 'Markdown' });
+                    await performProductSearch(chatId, session.query, session.isEan, normalizedCity, 0);
                 } else {
-                    bot.sendMessage(chatId, "⚠️ Não consegui extrair o nome da cidade. Buscando em geral...");
+                    bot.sendMessage(chatId, "⚠️ Não identifiquei a cidade. Buscando sem filtro...");
                     await performProductSearch(chatId, session.query, session.isEan, "", 0);
                 }
             } catch (err) {
@@ -110,11 +134,12 @@ bot.on('message', async (msg) => {
 
     // Se estávamos esperando filtro de cidade
     if (session && session.step === 'waiting_location_or_city') {
-        const input = text.toUpperCase().trim();
-        if (input === "PULAR FILTRO" || input === "PULAR") {
+        if (text.toUpperCase().trim() === "PULAR FILTRO" || text.toUpperCase().trim() === "PULAR") {
             await performProductSearch(chatId, session.query, session.isEan, "", 0);
         } else {
-            await performProductSearch(chatId, session.query, session.isEan, input, 0);
+            const cityInput = normalizeText(text);
+            session.cidade = cityInput;
+            await performProductSearch(chatId, session.query, session.isEan, cityInput, 0);
         }
         return;
     }
@@ -137,6 +162,22 @@ bot.on('callback_query', async (callbackQuery) => {
 
 async function handleSearchInput(chatId, input) {
     const isEan = /^\d{8,14}$/.test(input.trim());
+    const existingSession = userSessions[chatId];
+    
+    // Se já tem cidade, faz a busca direto
+    if (existingSession && existingSession.cidade) {
+        userSessions[chatId] = { 
+            step: 'browsing', 
+            query: input.trim(),
+            isEan: isEan,
+            offset: 0,
+            cidade: existingSession.cidade
+        };
+        bot.sendMessage(chatId, `🔍 Buscando *${input.trim()}* em *${existingSession.cidade}*...`, { parse_mode: 'Markdown' });
+        return await performProductSearch(chatId, input.trim(), isEan, existingSession.cidade, 0);
+    }
+
+    // Se não tem cidade, pergunta
     userSessions[chatId] = { 
         step: 'waiting_location_or_city', 
         query: input.trim(),
@@ -144,7 +185,7 @@ async function handleSearchInput(chatId, input) {
         offset: 0
     };
 
-    bot.sendMessage(chatId, `✅ Identificado: ${isEan ? "EAN" : "Produto"} *${input.trim()}*.\n\nDeseja filtrar por **Cidade**? Envie sua localização 📍 ou digite o nome da cidade (ou clique em "Pular").`, {
+    bot.sendMessage(chatId, `✅ Produto: *${input.trim()}*.\n\nDeseja filtrar por **Cidade**? Envie sua localização 📍 ou digite a cidade abaixo.`, {
         parse_mode: 'Markdown',
         reply_markup: {
             keyboard: [
@@ -163,7 +204,6 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
         let params = [];
         let whereClauses = [];
 
-        // BUSCA POR EAN OU DESCRIÇÃO
         if (isEan) {
             whereClauses.push(`p.codigo_barras = $${params.length + 1}`);
             params.push(query);
@@ -172,7 +212,6 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
             params.push(`%${query}%`);
         }
 
-        // FILTRO DE CIDADE (BUSCA EM EMITENTES VIA JOINS)
         if (cidade) {
             whereClauses.push(`e.municipio ILIKE $${params.length + 1}`);
             params.push(`%${cidade}%`);
@@ -180,7 +219,6 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
 
         const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-        // Contar total (corrigido JOIN)
         const countQuery = `SELECT count(*) 
                             FROM produtos_nfe p 
                             JOIN nfes n ON p.nfe_id = n.id
@@ -190,7 +228,6 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
         const countRes = await pool.query(countQuery, params);
         const total = parseInt(countRes.rows[0].count);
 
-        // Buscar dados (corrigido JOIN)
         const dataQuery = `SELECT p.descricao, p.valor_unitario, e.municipio, e.uf, e.nome as loja,
                                  e.logradouro, e.numero, e.bairro
                           FROM produtos_nfe p
@@ -203,10 +240,12 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
         const { rows } = await pool.query(dataQuery, params);
 
         if (rows.length === 0) {
-            return bot.sendMessage(chatId, `❌ Nenhum resultado para "${query}"${cidade ? ' em ' + cidade : ''}.`, getMenuKeyboard());
+            return bot.sendMessage(chatId, `❌ Nenhum resultado para "${query}"${cidade ? ' em ' + cidade : ''}.`, getMenuKeyboard(chatId));
         }
 
-        userSessions[chatId] = { query, isEan, cidade, offset, step: 'browsing' };
+        // Atualiza a sessão com a cidade usada (se tiver sido digitada/detectada agora)
+        userSessions[chatId].cidade = cidade || userSessions[chatId].cidade;
+        userSessions[chatId].step = 'browsing';
 
         for (const r of rows) {
             const preco = r.valor_unitario ? parseFloat(r.valor_unitario).toFixed(2) : '0.00';
@@ -240,12 +279,12 @@ async function performProductSearch(chatId, query, isEan, cidade, offset = 0) {
                 }
             });
         } else {
-            bot.sendMessage(chatId, "✅ Todos os resultados exibidos.", getMenuKeyboard());
+            bot.sendMessage(chatId, "✅ Fim da lista.", getMenuKeyboard(chatId));
         }
 
     } catch (err) {
         console.error("Bot Search Error:", err.message);
-        bot.sendMessage(chatId, "⚠️ Erro na consulta. Verifique se o produto ou cidade existem.", getMenuKeyboard());
+        bot.sendMessage(chatId, "⚠️ Erro na consulta.", getMenuKeyboard(chatId));
     }
 }
 

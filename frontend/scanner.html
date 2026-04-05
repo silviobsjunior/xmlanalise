@@ -3,85 +3,195 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Aqui Tem - Scanner Nativo</title>
+    <title>Aqui Tem - Scanner Pro</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root {
             --primary: #5c6bc0;
             --bg: #1a1b2e;
             --text: #ffffff;
+            --accent: #ff4081;
         }
 
         body {
-            font-family: sans-serif;
+            font-family: -apple-system, sans-serif;
             margin: 0;
             padding: 0;
             background-color: var(--bg);
             color: var(--text);
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
+            height: 100vh;
+            overflow: hidden;
         }
 
-        .container {
-            width: 80%;
+        .header {
+            padding: 15px;
             text-align: center;
+            background: #242645;
+        }
+
+        #reader {
+            flex: 1;
+            width: 100% !important;
+            border: none !important;
+            background: #000;
+        }
+
+        /* Overlay para o scanner */
+        .scanner-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 150px;
+            border: 2px solid var(--primary);
+            border-radius: 12px;
+            pointer-events: none;
+            z-index: 100;
+            box-shadow: 0 0 0 1000px rgba(0,0,0,0.5);
+        }
+
+        .scanner-line {
+            width: 100%;
+            height: 2px;
+            background: var(--accent);
+            position: absolute;
+            top: 0;
+            left: 0;
+            animation: scan 2s linear infinite;
+        }
+
+        @keyframes scan {
+            0% { top: 0%; }
+            100% { top: 100%; }
+        }
+
+        .footer {
             padding: 20px;
             background: #242645;
-            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
 
         .btn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 15px 30px;
+            padding: 12px;
             border-radius: 8px;
-            font-size: 1.1rem;
+            border: none;
+            font-weight: 600;
             cursor: pointer;
-            width: 100%;
-            margin-top: 20px;
+            text-align: center;
+        }
+
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-cancel { background: transparent; border: 1px solid #444; color: #aaa; }
+
+        #result-banner {
+            position: fixed;
+            bottom: 120px;
+            left: 20px;
+            right: 20px;
+            background: var(--primary);
+            padding: 15px;
+            border-radius: 12px;
+            display: none;
+            z-index: 200;
+            text-align: center;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>Scanner Aqui Tem</h2>
-        <p>Utilizando o leitor nativo do Telegram para maior precisão.</p>
-        <button id="scan-btn" class="btn">Abrir Câmera</button>
-        <p style="font-size: 0.8rem; margin-top: 20px; opacity: 0.6;">Dica: Se a leitura falhar, tente aproximar ou afastar o celular.</p>
+    <div class="header">
+        <h3 style="margin:0">🔍 Scanner de Preços</h3>
+        <p style="font-size:0.8rem; margin:5px 0 0; opacity:0.7">Alinhe o código de barras no quadro</p>
+    </div>
+
+    <div style="position: relative; flex:1; display: flex; flex-direction: column;">
+        <div id="reader"></div>
+        <div class="scanner-overlay" id="overlay">
+            <div class="scanner-line"></div>
+        </div>
+    </div>
+
+    <div id="result-banner">
+        <div style="font-size: 0.8rem; opacity: 0.8;">Código Detectado:</div>
+        <div id="detected-ean" style="font-size: 1.2rem; font-weight: bold; margin: 5px 0;"></div>
+        <button id="send-btn" class="btn btn-primary" style="width: 100%; margin-top: 5px;">PESQUISAR AGORA</button>
+    </div>
+
+    <div class="footer">
+        <button id="retry-btn" class="btn btn-primary" style="display:none">Tentar Novamente</button>
+        <button onclick="tg.close()" class="btn btn-cancel">Cancelar</button>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
 
-        function startNativeScan() {
-            // Abre o scanner nativo do Telegram
-            if (tg.showScanQrPopup) {
-                tg.showScanQrPopup({
-                    text: "Aponte para o código de barras (EAN)"
-                }, function(result) {
-                    if (result && result.length > 0) {
-                        // Ao encontrar um código, envia para o bot e encerra
-                        tg.sendData(result);
-                        tg.closeScanQrPopup();
-                        return true; // Encerra o popup
-                    }
-                });
-            } else {
-                alert("Seu Telegram não suporta o scanner nativo diretamente.");
+        let html5QrCode;
+        let lastResult = "";
+
+        async function initScanner() {
+            try {
+                // Tenta pausar o anterior se houver
+                if (html5QrCode) await html5QrCode.stop();
+                
+                html5QrCode = new Html5Qrcode("reader");
+                
+                const qrCodeSuccessCallback = (decodedText, decodedResult) => {
+                    if (decodedText === lastResult) return;
+                    lastResult = decodedText;
+                    
+                    // Sucesso na leitura
+                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+                    
+                    document.getElementById('overlay').style.display = 'none';
+                    document.getElementById('detected-ean').innerText = decodedText;
+                    document.getElementById('result-banner').style.display = 'block';
+                    
+                    // Pausar o scanner
+                    html5QrCode.pause(true);
+                };
+
+                const config = { 
+                    fps: 15, // Mais rápido para barras
+                    qrbox: { width: 300, height: 150 }, // Formato retangular para EAN
+                    aspectRatio: 1.0,
+                    // Priorizar formatos de barras comuns no Brasil
+                    formatsToSupport: [ 
+                        6, // EAN_13
+                        7, // EAN_8
+                        4, // CODE_128
+                        0  // QR_CODE
+                    ]
+                };
+
+                await html5QrCode.start({ facingMode: "environment" }, config, qrCodeSuccessCallback);
+            } catch (err) {
+                console.error("Scanner Error:", err);
+                alert("Erro ao acessar câmera. Verifique as permissões.");
             }
         }
 
-        document.getElementById('scan-btn').addEventListener('click', startNativeScan);
-
-        // Tenta abrir automaticamente ao carregar
-        document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(startNativeScan, 500);
+        document.getElementById('send-btn').addEventListener('click', () => {
+            if (lastResult) {
+                tg.sendData(lastResult);
+                tg.close();
+            }
         });
+
+        document.getElementById('retry-btn').addEventListener('click', () => {
+            lastResult = "";
+            document.getElementById('result-banner').style.display = 'none';
+            document.getElementById('overlay').style.display = 'block';
+            html5QrCode.resume();
+        });
+
+        // Espera um pouco para garantir que o container esteja pronto
+        setTimeout(initScanner, 300);
     </script>
 </body>
 </html>
