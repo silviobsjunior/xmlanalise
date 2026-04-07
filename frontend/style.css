@@ -578,3 +578,15 @@ body {
         display: none;
     }
 }
+
+/* =============================================
+   FOOTER - Estilo Minimalista
+============================================= */
+.site-footer {
+    margin-top: 60px;
+    padding: 20px 0;
+    border-top: 1px solid #e2e8f0;
+    color: #9ca3af;
+    text-align: center;
+    font-size: 11px;
+}

@@ -1192,6 +1192,7 @@ function setupEventListeners() {
     });
   });
 
+
   setupManualForm();
   setupSpreadsheetImport();
 

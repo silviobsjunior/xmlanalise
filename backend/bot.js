@@ -197,11 +197,17 @@ async function askForNeighborhood(chatId) {
 
 bot.on('callback_query', async (cq) => {
     const chatId = cq.message.chat.id;
+    const s = userSessions[chatId];
+
     if (cq.data === 'ver_mais') {
-        const s = userSessions[chatId];
         if (s && s.query) {
             s.offset = (s.offset || 0) + 5;
             await performProductSearch(chatId, s.query, s.isEan, s.cidade, s.bairro, s.offset);
+        }
+    } else if (cq.data === 'filtrar_bairro') {
+        if (s) {
+            s.step = 'waiting_neighborhood';
+            askForNeighborhood(chatId);
         }
     }
     bot.answerCallbackQuery(cq.id);
@@ -241,6 +247,7 @@ async function performProductSearch(chatId, query, isEan, cidade, bairro, offset
                    e.nome_fantasia AS vendedor_nome_fantasia,
                    e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
                    e.bairro AS vendedor_bairro, e.municipio AS vendedor_cidade, e.uf AS vendedor_uf,
+                   e.telefone AS vendedor_telefone,
                    nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
             FROM produtos_nfe p
             JOIN nfe_importadas ni ON p.nfe_id = ni.id
@@ -260,6 +267,7 @@ async function performProductSearch(chatId, query, isEan, cidade, bairro, offset
                    e.nome_fantasia AS vendedor_nome_fantasia,
                    e.logradouro AS vendedor_logradouro, e.numero AS vendedor_numero,
                    e.bairro AS vendedor_bairro, e.municipio AS vendedor_cidade, e.uf AS vendedor_uf,
+                   e.telefone AS vendedor_telefone,
                    nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
             FROM produtos_nfe p
             JOIN nfe_importadas ni ON p.nfe_id = ni.id
@@ -279,6 +287,7 @@ async function performProductSearch(chatId, query, isEan, cidade, bairro, offset
                    NULL AS vendedor_nome_fantasia,
                    d.logradouro AS vendedor_logradouro, d.numero AS vendedor_numero,
                    d.bairro AS vendedor_bairro, d.municipio AS vendedor_cidade, d.uf AS vendedor_uf,
+                   d.telefone AS vendedor_telefone,
                    nf.data_emissao, nf.chave_acesso, nf.perspectiva_importador
             FROM produtos_nfe p
             JOIN nfe_importadas ni ON p.nfe_id = ni.id
@@ -313,24 +322,46 @@ async function performProductSearch(chatId, query, isEan, cidade, bairro, offset
             const endereco = `${r.vendedor_logradouro || ''}, ${r.vendedor_numero || ''} - ${r.vendedor_bairro || ''}, ${r.vendedor_cidade || ''}/${r.vendedor_uf || ''}`;
             const encodedAddr = encodeURIComponent(endereco);
 
-            const msgText = `📦 *${r.descricao}*\n🆔 EAN: \`${r.codigo_barras || 'N/A'}\` | NCM: \`${r.ncm || 'N/A'}\`\n🏪 *${loja}*\n📂 CNPJ: \`${r.vendedor_cnpj || '---'}\`\n📍 ${r.vendedor_cidade} - ${r.vendedor_bairro || ''}\n🏠 _${endereco}_`;
+            let msgText = `📦 *${r.descricao}*\n🆔 EAN: \`${r.codigo_barras || 'N/A'}\` | NCM: \`${r.ncm || 'N/A'}\`\n🏪 *${loja}*\n📂 CNPJ: \`${r.vendedor_cnpj || '---'}\`\n📍 ${r.vendedor_cidade} - ${r.vendedor_bairro || ''}\n🏠 _${endereco}_`;
 
-            const inline_keyboard = [[
+            const buttons = [
                 { text: "🚗 Waze", url: `https://waze.com/ul?q=${encodedAddr}` },
                 { text: "🗺️ Maps", url: `https://www.google.com/maps/search/?api=1&query=${encodedAddr}` }
-            ]];
+            ];
 
-            await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown', reply_markup: { inline_keyboard } });
-        }
+            if (r.vendedor_telefone) {
+                msgText += `\n📞 Telefone: \`${r.vendedor_telefone}\``;
+                const tel = r.vendedor_telefone.replace(/\D/g, '');
+                if (tel) {
+                    buttons.push({ text: "📞 Chamar", url: `tel:${tel}` });
+                }
+            }
 
-        if (total > offset + limit) {
-            bot.sendMessage(chatId, `Exibindo ${offset + 1}-${offset + rows.length} de *${total}* itens.`, {
-                parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: "🔽 Ver Mais", callback_data: "ver_mais" }]] }
+            await bot.sendMessage(chatId, msgText, { 
+                parse_mode: 'Markdown', 
+                reply_markup: { inline_keyboard: [buttons] } 
             });
-        } else {
-            bot.sendMessage(chatId, "✅ Todos os resultados exibidos.", getMenuKeyboard(chatId));
         }
+
+        const summaryMsg = total > offset + limit 
+            ? `Exibindo ${offset + 1}-${offset + rows.length} de *${total}* itens.`
+            : "✅ Todos os resultados exibidos.";
+
+        const summaryButtons = [];
+        if (total > offset + limit) {
+            summaryButtons.push([{ text: "🔽 Ver Mais", callback_data: "ver_mais" }]);
+        }
+        
+        if (cidade && !bairro) {
+            summaryButtons.push([{ text: "🏘️ Filtrar por Bairro", callback_data: "filtrar_bairro" }]);
+        }
+
+        const summaryOpts = { 
+            parse_mode: 'Markdown',
+            ...(summaryButtons.length > 0 ? { reply_markup: { inline_keyboard: summaryButtons } } : getMenuKeyboard(chatId))
+        };
+
+        bot.sendMessage(chatId, summaryMsg, summaryOpts);
 
     } catch (err) {
         console.error("Bot Search Error:", err.message);
