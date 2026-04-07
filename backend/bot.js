@@ -330,10 +330,11 @@ async function performProductSearch(chatId, query, isEan, cidade, bairro, offset
             ];
 
             if (r.vendedor_telefone) {
-                msgText += `\n📞 Telefone: \`${r.vendedor_telefone}\``;
                 const tel = r.vendedor_telefone.replace(/\D/g, '');
+                msgText += `\n📞 Telefone: ${r.vendedor_telefone}`;
                 if (tel) {
-                    buttons.push({ text: "📞 Chamar", url: `tel:${tel}` });
+                    // Telegram não suporta tel: em botões inline. Usamos WhatsApp como alternativa comum.
+                    buttons.push({ text: "💬 WhatsApp", url: `https://wa.me/55${tel}` });
                 }
             }
 
