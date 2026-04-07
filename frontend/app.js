@@ -14,6 +14,8 @@ let todosOsBairros = [];
 let baseFiltrosGlobal = { cidades: [], bairros: [] };
 let filtrosEncontradosNaBusca = { cidades: [], bairros: [] }; // Persiste os locais encontrados no termo atual
 let resultadosBuscaAtuais = [];
+let inactivityTimeout;
+const INACTIVITY_TIME = 30 * 60 * 1000; // 30 minutos
 
 // ============================================================
 // CONFIGURAÇÕES E SUPABASE
@@ -69,6 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       await initAuth();
     }
+    resetInactivityTimer();
   } catch (e) {
     console.error('Erro na inicialização do Auth:', e);
     showAnonymousUser();
@@ -490,6 +493,8 @@ async function executarBusca() {
 
     resultadosBuscaAtuais = data.resultados;
     renderizarResultados(data.resultados, termo || '');
+    renderContributeInvite();
+    resetInactivityTimer();
 
     // PERSISTÊNCIA: Extrai e guarda os filtros se for uma nova busca por termo
     const extraidos = extrairFiltrosDeResultados(data.resultados);
@@ -1203,6 +1208,11 @@ function setupEventListeners() {
 
   // Carrega estatísticas gerais do dashboard ao iniciar
   carregarEstatisticasGerais();
+
+  // Reset timer em eventos globais
+  ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(name => {
+    document.addEventListener(name, resetInactivityTimer, true);
+  });
 }
 
 // ============================================================
@@ -1550,4 +1560,52 @@ async function processarLotePlanilha(rows) {
     await carregarFiltros();
     await carregarEstatisticasGerais();
   }
+}
+
+// ============================================================
+// ENGAJAMENTO E CONTRIBUIÇÃO (TELEGRAM / INATIVIDADE)
+// ============================================================
+function resetInactivityTimer() {
+    clearTimeout(inactivityTimeout);
+    inactivityTimeout = setTimeout(showInactivityModal, INACTIVITY_TIME);
+}
+
+function showInactivityModal() {
+    const modal = document.getElementById('inactivityModal');
+    if (modal) modal.classList.add('active');
+}
+
+window.closeInactivityModal = function() {
+    const modal = document.getElementById('inactivityModal');
+    if (modal) modal.classList.remove('active');
+    resetInactivityTimer();
+};
+
+window.goToUploadTab = function() {
+    closeInactivityModal();
+    const navItem = document.querySelector('.nav-item[data-tab="upload"]');
+    if (navItem) navItem.click();
+};
+
+function renderContributeInvite() {
+    const container = document.getElementById('contributeInviteContainer');
+    if (!container) return;
+
+    container.innerHTML = `
+    <div class="contribute-invite-card" style="margin-top: 24px; padding: 25px; border-radius: 16px; background: linear-gradient(135deg, #f0f4ff 0%, #ffffff 100%); border: 1px dashed #667eea; text-align: center;">
+        <div style="font-size: 32px; margin-bottom: 15px;">🤝</div>
+        <h3 style="color: #1a1f36; margin-bottom: 10px;">Encontrou o que procurava?</h3>
+        <p style="color: #6b7280; font-size: 14px; margin-bottom: 20px; max-width: 400px; margin-left: auto; margin-right: auto;">
+            Estas informações só estão aqui porque outros usuários como você compartilharam seus XMLs. Ajude nossa comunidade a crescer!
+        </p>
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="goToUploadTab()" style="padding: 10px 20px;">
+                📤 Enviar XML agora
+            </button>
+            <a href="https://t.me/AquiTem_bot" target="_blank" class="btn btn-outline" style="padding: 10px 20px; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+                <span>✈️</span> Chamar no Telegram
+            </a>
+        </div>
+    </div>
+    `;
 }

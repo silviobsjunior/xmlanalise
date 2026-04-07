@@ -114,6 +114,8 @@
                         <p>Digite um produto acima para buscar vendedores.</p>
                     </div>
                     <div id="buscaResultados"></div>
+                    <!-- Placeholder para convite de contribuição -->
+                    <div id="contributeInviteContainer"></div>
                 </div>
             </div>
 
@@ -305,7 +307,7 @@
             </div>
 
             <footer class="site-footer">
-                Última atualização: 2026-04-06 21:55
+                SANTANA & CIA - 36.851.891/0001-37 - Última atualização: 2026-04-06 21:55
             </footer>
         </main>
     </div>
@@ -333,6 +335,40 @@
     <div class="menu-toggle" id="menuToggle">☰</div>
 
 
+
+    <!-- Botão Flutuante Telegram -->
+    <a href="https://t.me/AquiTem_bot" target="_blank" class="telegram-fab" title="Falar com nosso Bot no Telegram">
+        <span class="telegram-icon">✈️</span>
+        <span class="telegram-text">Dúvidas? Chame no Bot</span>
+    </a>
+
+    <!-- Modal de Inatividade -->
+    <div id="inactivityModal" class="modal inactivity-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🕰️ Olá! Sentimos sua falta</h3>
+                <button class="modal-close" onclick="closeInactivityModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 30px;">
+                <div style="font-size: 50px; margin-bottom: 20px;">👋</div>
+                <h2 style="margin-bottom: 10px; color: #1a1f36;">Ainda está por aqui?</h2>
+                <p style="color: #6b7280; font-size: 16px; margin-bottom: 25px;">
+                    Percebemos que você está inativo há algum tempo. Sabia que nosso site é mantido pela colaboração de usuários como você?
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <button class="btn btn-primary" onclick="closeInactivityModal()" style="width: 100%; padding: 15px;">
+                        Continuar buscando
+                    </button>
+                    <button class="btn btn-outline" onclick="goToUploadTab()" style="width: 100%; padding: 15px;">
+                        📤 Contribuir com nota (XML)
+                    </button>
+                </div>
+                <p style="margin-top: 20px; font-size: 13px; color: #9ca3af;">
+                    Sua contribuição ajuda a manter os preços e locais sempre atualizados!
+                </p>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
