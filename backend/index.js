@@ -1883,12 +1883,166 @@ app.post('/api/incluir-manual', async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error(`${getTimestamp()} ❌ Erro na inclusão manual:`, error);
-        res.status(500).json({ 
-            sucesso: false, 
-            erro: 'Erro interno ao salvar registro manual', 
-            detalhes: error.message,
-            stack: error.stack 
-        });
+    } finally {
+        client.release();
+    }
+});
+
+// =============================================
+// ENDPOINT PARA INCLUSÃO MANUAL EM LOTE
+// =============================================
+app.post('/api/incluir-manual-lote', async (req, res) => {
+    const { itens } = req.body;
+    if (!itens || !Array.isArray(itens) || itens.length === 0) {
+        return res.status(400).json({ sucesso: false, erro: 'Lista de itens inválida' });
+    }
+
+    console.log(`\n${getTimestamp()} 📦 INCLUSÃO EM LOTE: ${itens.length} itens`);
+    const client = await pool.connect();
+    const userInfo = req.userInfo;
+    const cacheMunicipios = new Map();
+    
+    let sucessos = 0;
+    let erros = 0;
+    const detalhes = [];
+
+    try {
+        await client.query('BEGIN');
+
+        for (const item of itens) {
+            try {
+                const { vendedor, produto, data_emissao, perspectiva = 'vendedor' } = item;
+
+                if (!vendedor || !produto) {
+                    throw new Error('Dados incompletos');
+                }
+
+                // 0. NORMALIZAR DADOS DO VENDEDOR
+                const cnpjLimpo = String(vendedor.cnpj || '').replace(/\D/g, '');
+                const razaoSocial = String(vendedor.razao_social || 'FORNECEDOR MANUAL').substring(0, 100);
+                const nomeFantasia = String(vendedor.nome_fantasia || vendedor.razao_social || 'FORNECEDOR MANUAL').substring(0, 100);
+
+                // 1. RESOLVER MUNICÍPIO (com cache local)
+                const cacheKey = `${vendedor.codigo_municipio}|${vendedor.municipio}|${vendedor.uf}`;
+                let resolvedMun;
+                if (cacheMunicipios.has(cacheKey)) {
+                    resolvedMun = cacheMunicipios.get(cacheKey);
+                } else {
+                    resolvedMun = await resolveMunicipio(vendedor.codigo_municipio, vendedor.municipio, vendedor.uf);
+                    cacheMunicipios.set(cacheKey, resolvedMun);
+                }
+
+                const municipioFinal = resolvedMun.nome;
+                const ufFinal = resolvedMun.uf;
+                const codigoIbgeFinal = resolvedMun.codigo_ibge;
+
+                // 2. INSERIR/OBTER EMITENTE
+                let idEmitenteInt = null;
+                const emitenteExistente = await client.query(`SELECT id FROM emitentes WHERE cnpj = $1`, [cnpjLimpo]);
+
+                if (emitenteExistente.rows.length > 0) {
+                    idEmitenteInt = emitenteExistente.rows[0].id;
+                    await client.query(
+                        `UPDATE emitentes SET 
+                            razao_social = $1, nome_fantasia = $2, telefone = $3,
+                            logradouro = $4, numero = $5, complemento = $6,
+                            bairro = $7, municipio = $8, codigo_municipio = $9, uf = $10, cep = $11,
+                            atualizado_em = NOW()
+                         WHERE id = $12`,
+                        [razaoSocial, nomeFantasia, vendedor.telefone || null, vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null, vendedor.bairro || null, municipioFinal, codigoIbgeFinal, ufFinal, (vendedor.cep || '').replace(/\D/g, ''), idEmitenteInt]
+                    );
+                } else {
+                    const resEmi = await client.query(
+                        `INSERT INTO emitentes (cnpj, razao_social, nome_fantasia, telefone, logradouro, numero, complemento, bairro, municipio, codigo_municipio, uf, cep, criado_em, atualizado_em)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()) RETURNING id`,
+                        [cnpjLimpo, razaoSocial, nomeFantasia, vendedor.telefone || null, vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null, vendedor.bairro || null, municipioFinal, codigoIbgeFinal, ufFinal, (vendedor.cep || '').replace(/\D/g, '')]
+                    );
+                    idEmitenteInt = resEmi.rows[0].id;
+                }
+
+                // 3. RESOLVER ATOR (Emitente)
+                let emitenteUUID = null;
+                const atorExistente = await client.query(`SELECT id FROM atores WHERE identificador = $1`, [cnpjLimpo]);
+                if (atorExistente.rows.length > 0) {
+                    emitenteUUID = atorExistente.rows[0].id;
+                } else {
+                    const resAtor = await client.query(
+                        `INSERT INTO atores (tipo_identificador, identificador, razao_social, nome_fantasia, tipo_pessoa, created_at, updated_at)
+                         VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id`,
+                        ['CNPJ', cnpjLimpo, razaoSocial, nomeFantasia, 'JURIDICA']
+                    );
+                    emitenteUUID = resAtor.rows[0].id;
+                }
+
+                // 4. RESOLVER ATOR (Destinatário) - Usando cache para CONSUMIDOR_FINAL
+                let destinatarioUUID = cacheMunicipios.get('CONSUMIDOR_FINAL_UUID');
+                if (!destinatarioUUID) {
+                    const atorConsumidor = await client.query(`SELECT id FROM atores WHERE identificador = 'CONSUMIDOR_FINAL' LIMIT 1`);
+                    if (atorConsumidor.rows.length > 0) {
+                        destinatarioUUID = atorConsumidor.rows[0].id;
+                    } else {
+                        const resCons = await client.query(
+                            `INSERT INTO atores (tipo_identificador, identificador, razao_social, nome_fantasia, tipo_pessoa, created_at, updated_at)
+                             VALUES ('OUT', 'CONSUMIDOR_FINAL', 'Consumidor Final Não Identificado', 'Consumidor Final', 'FISICA', NOW(), NOW()) RETURNING id`
+                        );
+                        destinatarioUUID = resCons.rows[0].id;
+                    }
+                    cacheMunicipios.set('CONSUMIDOR_FINAL_UUID', destinatarioUUID);
+                }
+
+                // 5. TRATAR DATA E IDENTIDADES
+                let manualData = data_emissao || new Date().toISOString();
+                const usuarioId = userInfo.type === 'user' ? userInfo.id : null;
+                const sessaoAnonimaId = userInfo.type === 'anonymous' ? userInfo.id : null;
+
+                // 6. SALVAR NOTA E PRODUTO
+                const processarPerspectiva = async (pImportador) => {
+                    const manualChave = `MANUAL-${crypto.randomUUID().replace(/-/g, '')}`;
+                    const qtd = parseFloat(produto.quantidade) || 0;
+                    const vUnit = parseFloat(produto.valor_unitario) || 0;
+                    const vTotal = qtd * vUnit;
+
+                    await client.query(
+                        `INSERT INTO notas_fiscais (chave_acesso, numero, serie, data_emissao, status, natureza_operacao, tipo_operacao, finalidade, consumidor_final, presenca_comprador, processo_emissao, versao_processo, emitente_id, destinatario_id, usuario_id, sessao_anonima_id, perspectiva_importador, valor_total_nota, created_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())`,
+                        [manualChave, 0, 0, manualData, 'MANUAL', 'INCLUSÃO MANUAL', 1, 1, true, 0, 1, '4.00', emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId, pImportador, vTotal]
+                    );
+
+                    const resImp = await client.query(
+                        `INSERT INTO nfe_importadas (chave_acesso, numero, serie, data_emissao, created_at)
+                         VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
+                        [manualChave, 0, 0, manualData]
+                    );
+                    
+                    const idNfeImportada = resImp.rows[0].id;
+
+                    await client.query(
+                        `INSERT INTO produtos_nfe (nfe_id, numero_item, codigo_produto, codigo_barras, descricao, ncm, cfop, quantidade, valor_unitario, valor_total, created_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
+                        [idNfeImportada, 1, 'MANUAL', (produto.codigo_barras || '').replace(/\D/g, '') || null, String(produto.descricao || 'PRODUTO MANUAL').substring(0, 200), (produto.ncm || '').replace(/\D/g, '') || null, '0000', qtd, vUnit, vTotal]
+                    );
+                };
+
+                if (perspectiva === 'vendedor' || perspectiva === 'emitente') await processarPerspectiva('emitente');
+                else if (perspectiva === 'comprador' || perspectiva === 'revendedor') await processarPerspectiva('revendedor');
+                else if (perspectiva === 'consumidor') await processarPerspectiva('consumidor');
+                else if (perspectiva === 'ambos') { await processarPerspectiva('emitente'); await processarPerspectiva('revendedor'); }
+                else await processarPerspectiva('emitente');
+
+                sucessos++;
+            } catch (err) {
+                erros++;
+                detalhes.push({ erro: err.message, item: item.produto?.descricao || 'Desconhecido' });
+            }
+        }
+
+        await client.query('COMMIT');
+        res.json({ sucesso: true, sucessos, erros, detalhes });
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(`${getTimestamp()} ❌ Erro no lote:`, error);
+        res.status(500).json({ sucesso: false, erro: 'Erro ao processar lote', detalhes: error.message });
     } finally {
         client.release();
     }

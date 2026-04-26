@@ -1446,6 +1446,7 @@ async function processarLotePlanilha(rows) {
   let sucessos = 0;
   let erros = 0;
   const details = [];
+  const BATCH_SIZE = 50; // Processar 50 por vez para equilíbrio entre performance e feedback
 
   // Elementos da Barra de Progresso
   const progressContainer = document.getElementById('spreadsheetProgressContainer');
@@ -1457,7 +1458,7 @@ async function processarLotePlanilha(rows) {
 
   if (progressContainer) {
     progressContainer.style.display = 'block';
-    progressStatus.textContent = 'Iniciando processamento...';
+    progressStatus.textContent = 'Preparando lote...';
     progressBar.style.width = '0%';
     progressPercent.textContent = '0%';
     progressCount.textContent = `0 / ${totalRows} registros`;
@@ -1466,12 +1467,104 @@ async function processarLotePlanilha(rows) {
 
   const startTime = Date.now();
 
-  for (let i = 0; i < totalRows; i++) {
-    const row = rows[i];
-    
-    // Atualiza Progresso na UI
+  for (let i = 0; i < totalRows; i += BATCH_SIZE) {
+    const chunk = rows.slice(i, i + BATCH_SIZE);
+    const batchPayloads = [];
+
+    // Mapeamento dos itens do chunk
+    for (const row of chunk) {
+      const getAttr = (prefixes, suffixes) => {
+        for (const p of prefixes) {
+          for (const s of suffixes) {
+            const key = p ? `${p}_${s}` : s;
+            if (row[key] !== undefined) return row[key];
+            const camel = p ? `${p}${s.charAt(0).toUpperCase()}${s.slice(1)}` : s;
+            if (row[camel] !== undefined) return row[camel];
+          }
+        }
+        return null;
+      };
+
+      const vCnpj = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['cnpj', 'identificador', 'doc']) || '').replace(/\D/g, '');
+      const vRazao = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['razao_social', 'nome', 'xnome']) || '').trim();
+      
+      if (!vCnpj || !vRazao) {
+        erros++;
+        details.push({ name: `Linha ${rows.indexOf(row) + 1}`, status: 'error', message: 'CNPJ ou Razão Social ausente' });
+        continue;
+      }
+
+      let dataEmi = row.data_emissao || row.data || row.emissao;
+      if (typeof dataEmi === 'number') {
+        const date = new Date(Math.round((dataEmi - 25569) * 86400 * 1000));
+        dataEmi = date.toISOString().split('T')[0];
+      } else if (!dataEmi) {
+        dataEmi = new Date().toISOString().split('T')[0];
+      }
+
+      let ncmStr = String(row.produto_ncm || row.ncm || '').replace(/\D/g, '');
+      if (ncmStr && ncmStr.length > 0 && ncmStr.length < 8) ncmStr = ncmStr.padStart(8, '0');
+
+      batchPayloads.push({
+        vendedor: {
+          cnpj: vCnpj,
+          razao_social: vRazao,
+          nome_fantasia: String(row.vendedor_nome_fantasia || row.fantasia || vRazao).trim(),
+          telefone: String(row.vendedor_telefone || row.telefone || '').trim(),
+          logradouro: String(row.vendedor_logradouro || row.logradouro || '').trim(),
+          numero: String(row.vendedor_numero || row.numero || '').trim(),
+          complemento: String(row.vendedor_complemento || row.complemento || '').trim(),
+          bairro: String(row.vendedor_bairro || row.bairro || '').trim(),
+          municipio: String(row.vendedor_cidade || row.municipio || row.cidade || '').trim(),
+          codigo_municipio: (row.vendedor_cidade_ibge || row.ibge || row.cmun) ? String(row.vendedor_cidade_ibge || row.ibge || row.cmun).replace(/\D/g, '') : null,
+          uf: String(row.vendedor_uf || row.uf || '').toUpperCase().trim(),
+          cep: String(row.vendedor_cep || row.cep || '').replace(/\D/g, '')
+        },
+        produto: {
+          codigo_barras: String(row.produto_cean || row.cean || row.barras || '').trim(),
+          descricao: String(row.produto_descricao || row.descricao || row.xprod || '').trim(),
+          ncm: ncmStr,
+          unidade: String(row.produto_unidade || row.unidade || row.ucom || 'UN').trim(),
+          quantidade: parseFloat(row.produto_quantidade || row.quantidade || row.qcom) || 0,
+          valor_unitario: parseFloat(row.produto_valor_unitario || row.valor_unitario || row.vuncom || row.valor_unit || row.preco) || 0
+        },
+        data_emissao: dataEmi,
+        perspectiva: String(row.perspectiva || row.tipo || 'vendedor').toLowerCase().trim()
+      });
+    }
+
+    if (batchPayloads.length === 0) continue;
+
+    // Envia o lote para o servidor
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+
+      const res = await fetch(`${API}/api/incluir-manual-lote`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ itens: batchPayloads })
+      });
+      const result = await res.json();
+      
+      if (result.sucesso) {
+        sucessos += result.sucessos || 0;
+        erros += result.erros || 0;
+        if (result.detalhes) {
+          details.push(...result.detalhes.map(d => ({ name: d.item, status: 'error', message: d.erro })));
+        }
+      } else {
+        erros += chunk.length;
+        details.push({ name: 'Lote', status: 'error', message: result.erro || 'Erro no lote' });
+      }
+    } catch (err) {
+      erros += chunk.length;
+      details.push({ name: 'Conexão', status: 'error', message: err.message });
+    }
+
+    // Atualiza UI
     if (progressContainer) {
-      const current = i + 1;
+      const current = Math.min(i + BATCH_SIZE, totalRows);
       const percent = Math.round((current / totalRows) * 100);
       const elapsed = (Date.now() - startTime) / 1000;
       const avgTime = elapsed / current;
@@ -1480,103 +1573,13 @@ async function processarLotePlanilha(rows) {
       progressBar.style.width = `${percent}%`;
       progressPercent.textContent = `${percent}%`;
       progressCount.textContent = `${current} / ${totalRows} registros`;
-      progressStatus.textContent = `Processando: ${row.produto_descricao || row.descricao || 'Item'}`;
+      progressStatus.textContent = `Processando lote (${current} de ${totalRows})...`;
       
-      if (current > 3) { // Espera alguns registros para ter uma média estável
+      if (current > 0) {
         const minutes = Math.floor(remainingSeconds / 60);
         const seconds = remainingSeconds % 60;
         progressEta.textContent = `Restam aprox. ${minutes}m ${seconds}s`;
       }
-    }
-
-    // MAPEAMENTO FLEXÍVEL (Suporte a nomes de campos variados)
-    const getAttr = (prefixes, suffixes) => {
-      for (const p of prefixes) {
-        for (const s of suffixes) {
-          const key = p ? `${p}_${s}` : s;
-          if (row[key] !== undefined) return row[key];
-          const camel = p ? `${p}${s.charAt(0).toUpperCase()}${s.slice(1)}` : s;
-          if (row[camel] !== undefined) return row[camel];
-        }
-      }
-      return null;
-    };
-
-    const vCnpj = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['cnpj', 'identificador', 'doc']) || '').replace(/\D/g, '');
-    const vRazao = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['razao_social', 'nome', 'xnome']) || '').trim();
-    
-    if (!vCnpj || !vRazao) {
-      erros++;
-      details.push({ name: `Linha ${i + 1}`, status: 'error', message: 'CNPJ ou Razão Social ausente' });
-      continue;
-    }
-
-    let dataEmi = row.data_emissao || row.data || row.emissao;
-    if (typeof dataEmi === 'number') {
-      const date = new Date(Math.round((dataEmi - 25569) * 86400 * 1000));
-      dataEmi = date.toISOString().split('T')[0];
-    } else if (!dataEmi) {
-      dataEmi = new Date().toISOString().split('T')[0];
-    }
-
-    let ncmStr = String(row.produto_ncm || row.ncm || '').replace(/\D/g, '');
-    if (ncmStr && ncmStr.length > 0 && ncmStr.length < 8) {
-      ncmStr = ncmStr.padStart(8, '0');
-    }
-
-    const payload = {
-      vendedor: {
-        cnpj: vCnpj,
-        razao_social: vRazao,
-        nome_fantasia: String(row.vendedor_nome_fantasia || row.fantasia || vRazao).trim(),
-        telefone: String(row.vendedor_telefone || row.telefone || '').trim(),
-        logradouro: String(row.vendedor_logradouro || row.logradouro || '').trim(),
-        numero: String(row.vendedor_numero || row.numero || '').trim(),
-        complemento: String(row.vendedor_complemento || row.complemento || '').trim(),
-        bairro: String(row.vendedor_bairro || row.bairro || '').trim(),
-        municipio: String(row.vendedor_cidade || row.municipio || row.cidade || '').trim(),
-        codigo_municipio: (row.vendedor_cidade_ibge || row.ibge || row.cmun) ? String(row.vendedor_cidade_ibge || row.ibge || row.cmun).replace(/\D/g, '') : null,
-        uf: String(row.vendedor_uf || row.uf || '').toUpperCase().trim(),
-        cep: String(row.vendedor_cep || row.cep || '').replace(/\D/g, '')
-      },
-      produto: {
-        codigo_barras: String(row.produto_cean || row.cean || row.barras || '').trim(),
-        descricao: String(row.produto_descricao || row.descricao || row.xprod || '').trim(),
-        ncm: ncmStr,
-        unidade: String(row.produto_unidade || row.unidade || row.ucom || 'UN').trim(),
-        quantidade: parseFloat(row.produto_quantidade || row.quantidade || row.qcom) || 0,
-        valor_unitario: parseFloat(row.produto_valor_unitario || row.valor_unitario || row.vuncom || row.valor_unit || row.preco) || 0
-      },
-      data_emissao: dataEmi,
-      perspectiva: String(row.perspectiva || row.tipo || 'vendedor').toLowerCase().trim()
-    };
-
-    if (!payload.produto.descricao) {
-      erros++;
-      details.push({ name: vRazao, status: 'error', message: 'Descrição do produto ausente' });
-      continue;
-    }
-
-    try {
-      const headers = { 'Content-Type': 'application/json' };
-      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
-
-      const res = await fetch(`${API}/api/incluir-manual`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload)
-      });
-      const result = await res.json();
-      if (result.sucesso) {
-        sucessos++;
-        details.push({ name: payload.produto.descricao, status: 'success', message: vRazao });
-      } else {
-        erros++;
-        details.push({ name: payload.produto.descricao, status: 'error', message: result.erro || 'Erro ao processar' });
-      }
-    } catch (err) {
-      erros++;
-      details.push({ name: payload.produto.descricao, status: 'error', message: err.message });
     }
   }
 
@@ -1594,7 +1597,7 @@ async function processarLotePlanilha(rows) {
     success: sucessos,
     duplicates: 0,
     errors: erros,
-    details: details
+    details: details.slice(0, 500) // Limita detalhes para não travar o modal
   });
 
   if (sucessos > 0) {
