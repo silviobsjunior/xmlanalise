@@ -1909,7 +1909,11 @@ app.post('/api/incluir-manual-lote', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        for (const item of itens) {
+        for (let i = 0; i < itens.length; i++) {
+            const item = itens[i];
+            const spName = `sp_${i}`;
+            await client.query(`SAVEPOINT ${spName}`);
+
             try {
                 const { vendedor, produto, data_emissao, perspectiva = 'vendedor' } = item;
 
@@ -2004,14 +2008,20 @@ app.post('/api/incluir-manual-lote', async (req, res) => {
                 // 6. SALVAR NOTA E PRODUTO
                 const processarPerspectiva = async (pImportador) => {
                     const manualChave = `MANUAL-${crypto.randomUUID().replace(/-/g, '')}`;
-                    const qtd = parseFloat(produto.quantidade) || 0;
-                    const vUnit = parseFloat(produto.valor_unitario) || 0;
+                    let qtd = parseFloat(produto.quantidade) || 0;
+                    let vUnit = parseFloat(produto.valor_unitario) || 0;
+                    
+                    // Se os valores forem absurdos ou inválidos, usamos 1 como padrão conforme solicitado
+                    if (vUnit > 1000000000 || vUnit <= 0) vUnit = 1.00;
+                    if (qtd > 1000000000 || qtd <= 0) qtd = 1.00;
+                    
                     const vTotal = qtd * vUnit;
+                    const safeVTotal = vTotal > 100000000000 ? 1.00 : vTotal;
 
                     await client.query(
                         `INSERT INTO notas_fiscais (chave_acesso, numero, serie, data_emissao, status, natureza_operacao, tipo_operacao, finalidade, consumidor_final, presenca_comprador, processo_emissao, versao_processo, emitente_id, destinatario_id, usuario_id, sessao_anonima_id, perspectiva_importador, valor_total_nota, created_at)
                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())`,
-                        [manualChave, 0, 0, manualData, 'MANUAL', 'INCLUSÃO MANUAL', 1, 1, true, 0, 1, '4.00', emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId, pImportador, vTotal]
+                        [manualChave, 0, 0, manualData, 'MANUAL', 'INCLUSÃO MANUAL', 1, 1, true, 0, 1, '4.00', emitenteUUID, destinatarioUUID, usuarioId, sessaoAnonimaId, pImportador, safeVTotal]
                     );
 
                     const resImp = await client.query(
@@ -2025,7 +2035,7 @@ app.post('/api/incluir-manual-lote', async (req, res) => {
                     await client.query(
                         `INSERT INTO produtos_nfe (nfe_id, numero_item, codigo_produto, codigo_barras, descricao, ncm, cfop, quantidade, valor_unitario, valor_total, created_at)
                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
-                        [idNfeImportada, 1, 'MANUAL', (produto.codigo_barras || '').replace(/\D/g, '') || null, String(produto.descricao || 'PRODUTO MANUAL').substring(0, 200), (produto.ncm || '').replace(/\D/g, '') || null, '0000', qtd, vUnit, vTotal]
+                        [idNfeImportada, 1, 'MANUAL', (produto.codigo_barras || '').replace(/\D/g, '') || null, String(produto.descricao || 'PRODUTO MANUAL').substring(0, 200), (produto.ncm || '').replace(/\D/g, '') || null, '0000', qtd, vUnit, safeVTotal]
                     );
                 };
 
@@ -2035,8 +2045,10 @@ app.post('/api/incluir-manual-lote', async (req, res) => {
                 else if (perspectiva === 'ambos') { await processarPerspectiva('emitente'); await processarPerspectiva('revendedor'); }
                 else await processarPerspectiva('emitente');
 
+                await client.query(`RELEASE SAVEPOINT ${spName}`);
                 sucessos++;
             } catch (err) {
+                await client.query(`ROLLBACK TO SAVEPOINT ${spName}`);
                 erros++;
                 detalhes.push({ erro: err.message, item: item.produto?.descricao || 'Desconhecido' });
             }
