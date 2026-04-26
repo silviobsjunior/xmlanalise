@@ -1936,43 +1936,49 @@ app.post('/api/incluir-manual-lote', async (req, res) => {
                 const ufFinal = resolvedMun.uf;
                 const codigoIbgeFinal = resolvedMun.codigo_ibge;
 
-                // 2. INSERIR/OBTER EMITENTE
-                let idEmitenteInt = null;
-                const emitenteExistente = await client.query(`SELECT id FROM emitentes WHERE cnpj = $1`, [cnpjLimpo]);
+                // 2. INSERIR/OBTER EMITENTE (ON CONFLICT para performance)
+                const resEmi = await client.query(
+                    `INSERT INTO emitentes (
+                        cnpj, razao_social, nome_fantasia, telefone,
+                        logradouro, numero, complemento, bairro, municipio, codigo_municipio, uf, cep,
+                        criado_em, atualizado_em
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+                    ON CONFLICT (cnpj) DO UPDATE SET
+                        razao_social = EXCLUDED.razao_social,
+                        nome_fantasia = EXCLUDED.nome_fantasia,
+                        telefone = EXCLUDED.telefone,
+                        logradouro = EXCLUDED.logradouro,
+                        numero = EXCLUDED.numero,
+                        complemento = EXCLUDED.complemento,
+                        bairro = EXCLUDED.bairro,
+                        municipio = EXCLUDED.municipio,
+                        codigo_municipio = EXCLUDED.codigo_municipio,
+                        uf = EXCLUDED.uf,
+                        cep = EXCLUDED.cep,
+                        atualizado_em = NOW()
+                    RETURNING id`,
+                    [
+                        cnpjLimpo, razaoSocial, nomeFantasia, vendedor.telefone || null,
+                        vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null,
+                        vendedor.bairro || null, municipioFinal, codigoIbgeFinal, ufFinal, (vendedor.cep || '').replace(/\D/g, '')
+                    ]
+                );
+                const idEmitenteInt = resEmi.rows[0].id;
 
-                if (emitenteExistente.rows.length > 0) {
-                    idEmitenteInt = emitenteExistente.rows[0].id;
-                    await client.query(
-                        `UPDATE emitentes SET 
-                            razao_social = $1, nome_fantasia = $2, telefone = $3,
-                            logradouro = $4, numero = $5, complemento = $6,
-                            bairro = $7, municipio = $8, codigo_municipio = $9, uf = $10, cep = $11,
-                            atualizado_em = NOW()
-                         WHERE id = $12`,
-                        [razaoSocial, nomeFantasia, vendedor.telefone || null, vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null, vendedor.bairro || null, municipioFinal, codigoIbgeFinal, ufFinal, (vendedor.cep || '').replace(/\D/g, ''), idEmitenteInt]
-                    );
-                } else {
-                    const resEmi = await client.query(
-                        `INSERT INTO emitentes (cnpj, razao_social, nome_fantasia, telefone, logradouro, numero, complemento, bairro, municipio, codigo_municipio, uf, cep, criado_em, atualizado_em)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()) RETURNING id`,
-                        [cnpjLimpo, razaoSocial, nomeFantasia, vendedor.telefone || null, vendedor.logradouro || null, vendedor.numero || null, vendedor.complemento || null, vendedor.bairro || null, municipioFinal, codigoIbgeFinal, ufFinal, (vendedor.cep || '').replace(/\D/g, '')]
-                    );
-                    idEmitenteInt = resEmi.rows[0].id;
-                }
-
-                // 3. RESOLVER ATOR (Emitente)
-                let emitenteUUID = null;
-                const atorExistente = await client.query(`SELECT id FROM atores WHERE identificador = $1`, [cnpjLimpo]);
-                if (atorExistente.rows.length > 0) {
-                    emitenteUUID = atorExistente.rows[0].id;
-                } else {
-                    const resAtor = await client.query(
-                        `INSERT INTO atores (tipo_identificador, identificador, razao_social, nome_fantasia, tipo_pessoa, created_at, updated_at)
-                         VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING id`,
-                        ['CNPJ', cnpjLimpo, razaoSocial, nomeFantasia, 'JURIDICA']
-                    );
-                    emitenteUUID = resAtor.rows[0].id;
-                }
+                // 3. RESOLVER ATOR (Emitente) - ON CONFLICT para performance
+                const resAtor = await client.query(
+                    `INSERT INTO atores (
+                        tipo_identificador, identificador, razao_social, 
+                        nome_fantasia, tipo_pessoa, created_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                    ON CONFLICT (identificador) DO UPDATE SET
+                        razao_social = EXCLUDED.razao_social,
+                        nome_fantasia = EXCLUDED.nome_fantasia,
+                        updated_at = NOW()
+                    RETURNING id`,
+                    ['CNPJ', cnpjLimpo, razaoSocial, nomeFantasia, 'JURIDICA']
+                );
+                const emitenteUUID = resAtor.rows[0].id;
 
                 // 4. RESOLVER ATOR (Destinatário) - Usando cache para CONSUMIDOR_FINAL
                 let destinatarioUUID = cacheMunicipios.get('CONSUMIDOR_FINAL_UUID');

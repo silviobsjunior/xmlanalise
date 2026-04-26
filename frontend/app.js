@@ -1446,7 +1446,7 @@ async function processarLotePlanilha(rows) {
   let sucessos = 0;
   let erros = 0;
   const details = [];
-  const BATCH_SIZE = 50; // Processar 50 por vez para equilíbrio entre performance e feedback
+  const BATCH_SIZE = 200; // Aumentado para 200 para processar 300k registros mais rápido
 
   // Elementos da Barra de Progresso
   const progressContainer = document.getElementById('spreadsheetProgressContainer');
