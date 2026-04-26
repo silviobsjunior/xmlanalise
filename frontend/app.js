@@ -1447,17 +1447,54 @@ async function processarLotePlanilha(rows) {
   let erros = 0;
   const details = [];
 
-  showToast(`⏳ Iniciando importação de ${totalRows} registros...`, 'info');
+  // Elementos da Barra de Progresso
+  const progressContainer = document.getElementById('spreadsheetProgressContainer');
+  const progressBar = document.getElementById('spreadsheetProgressBar');
+  const progressPercent = document.getElementById('spreadsheetProgressPercent');
+  const progressStatus = document.getElementById('spreadsheetProgressStatus');
+  const progressCount = document.getElementById('spreadsheetProgressCount');
+  const progressEta = document.getElementById('spreadsheetProgressEta');
+
+  if (progressContainer) {
+    progressContainer.style.display = 'block';
+    progressStatus.textContent = 'Iniciando processamento...';
+    progressBar.style.width = '0%';
+    progressPercent.textContent = '0%';
+    progressCount.textContent = `0 / ${totalRows} registros`;
+    progressEta.textContent = 'Calculando tempo restante...';
+  }
+
+  const startTime = Date.now();
 
   for (let i = 0; i < totalRows; i++) {
     const row = rows[i];
+    
+    // Atualiza Progresso na UI
+    if (progressContainer) {
+      const current = i + 1;
+      const percent = Math.round((current / totalRows) * 100);
+      const elapsed = (Date.now() - startTime) / 1000;
+      const avgTime = elapsed / current;
+      const remainingSeconds = Math.round(avgTime * (totalRows - current));
+      
+      progressBar.style.width = `${percent}%`;
+      progressPercent.textContent = `${percent}%`;
+      progressCount.textContent = `${current} / ${totalRows} registros`;
+      progressStatus.textContent = `Processando: ${row.produto_descricao || row.descricao || 'Item'}`;
+      
+      if (current > 3) { // Espera alguns registros para ter uma média estável
+        const minutes = Math.floor(remainingSeconds / 60);
+        const seconds = remainingSeconds % 60;
+        progressEta.textContent = `Restam aprox. ${minutes}m ${seconds}s`;
+      }
+    }
+
     // MAPEAMENTO FLEXÍVEL (Suporte a nomes de campos variados)
     const getAttr = (prefixes, suffixes) => {
       for (const p of prefixes) {
         for (const s of suffixes) {
           const key = p ? `${p}_${s}` : s;
           if (row[key] !== undefined) return row[key];
-          // Tenta camelCase e PascalCase se necessário
           const camel = p ? `${p}${s.charAt(0).toUpperCase()}${s.slice(1)}` : s;
           if (row[camel] !== undefined) return row[camel];
         }
@@ -1468,14 +1505,12 @@ async function processarLotePlanilha(rows) {
     const vCnpj = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['cnpj', 'identificador', 'doc']) || '').replace(/\D/g, '');
     const vRazao = String(getAttr(['vendedor', 'fornecedor', 'emitente', ''], ['razao_social', 'nome', 'xnome']) || '').trim();
     
-    // Se não tiver o "mínimo dos mínimos", pula este registro
     if (!vCnpj || !vRazao) {
       erros++;
       details.push({ name: `Linha ${i + 1}`, status: 'error', message: 'CNPJ ou Razão Social ausente' });
       continue;
     }
 
-    // Tratamento de Data (Excel serial ou string)
     let dataEmi = row.data_emissao || row.data || row.emissao;
     if (typeof dataEmi === 'number') {
       const date = new Date(Math.round((dataEmi - 25569) * 86400 * 1000));
@@ -1484,7 +1519,6 @@ async function processarLotePlanilha(rows) {
       dataEmi = new Date().toISOString().split('T')[0];
     }
 
-    // Tratamento de NCM (Garantir 8 dígitos)
     let ncmStr = String(row.produto_ncm || row.ncm || '').replace(/\D/g, '');
     if (ncmStr && ncmStr.length > 0 && ncmStr.length < 8) {
       ncmStr = ncmStr.padStart(8, '0');
@@ -1517,7 +1551,6 @@ async function processarLotePlanilha(rows) {
       perspectiva: String(row.perspectiva || row.tipo || 'vendedor').toLowerCase().trim()
     };
 
-    // Validação de Descrição do Produto
     if (!payload.produto.descricao) {
       erros++;
       details.push({ name: vRazao, status: 'error', message: 'Descrição do produto ausente' });
@@ -1545,6 +1578,14 @@ async function processarLotePlanilha(rows) {
       erros++;
       details.push({ name: payload.produto.descricao, status: 'error', message: err.message });
     }
+  }
+
+  // Finaliza e oculta progresso
+  if (progressContainer) {
+    progressStatus.textContent = 'Importação concluída!';
+    setTimeout(() => {
+      progressContainer.style.display = 'none';
+    }, 3000);
   }
 
   showImportSummary({

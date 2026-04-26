@@ -224,9 +224,24 @@
                             registros de uma vez.
                         </p>
                         <input type="file" id="spreadsheetInput" accept=".xlsx, .xls, .csv" hidden>
-                        <button id="uploadSpreadsheetBtn" class="btn btn-primary">
-                            📤 Upload Planilha
+                        <button id="importarLoteBtn" class="btn-import">
+                            <i class="fas fa-file-import"></i> Iniciar Importação
                         </button>
+                        
+                        <!-- Novo: Barra de Progresso para Importação de Planilha -->
+                        <div id="spreadsheetProgressContainer" class="progress-container" style="display: none;">
+                            <div class="progress-header">
+                                <span id="spreadsheetProgressStatus" class="progress-status">Preparando importação...</span>
+                                <span id="spreadsheetProgressPercent" class="progress-percentage">0%</span>
+                            </div>
+                            <div class="progress-bar-wrapper">
+                                <div id="spreadsheetProgressBar" class="progress-bar-fill"></div>
+                            </div>
+                            <div class="progress-info">
+                                <span id="spreadsheetProgressCount">0 / 0 registros</span>
+                                <span id="spreadsheetProgressEta">Estimando tempo...</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
