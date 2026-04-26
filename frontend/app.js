@@ -1403,7 +1403,7 @@ window.setNcmFilter = (ncm) => {
 // IMPORTAÇÃO DE PLANILHA
 // ============================================================
 function setupSpreadsheetImport() {
-  const btn = document.getElementById('uploadSpreadsheetBtn');
+  const btn = document.getElementById('importarLoteBtn');
   const input = document.getElementById('spreadsheetInput');
   if (!btn || !input) return;
 
